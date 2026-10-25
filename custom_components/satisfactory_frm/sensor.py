@@ -63,8 +63,13 @@ def _headroom(raw: dict[str, Any]) -> float | None:
 
 def _load(raw: dict[str, Any]) -> float | None:
     cap, used = _num(raw.get("PowerCapacity")), _num(raw.get("PowerConsumed"))
-    if not cap or used is None:
+    if cap is None or used is None:
         return None
+    if cap <= 0:
+        # Dead grid: report 100 % if anything wants power (consumption or
+        # demand), 0 % only for a circuit with nothing on it.
+        demand = _num(raw.get("PowerMaxConsumed")) or 0
+        return 100.0 if (used > 0 or demand > 0) else 0.0
     return round(used / cap * 100, 1)
 
 

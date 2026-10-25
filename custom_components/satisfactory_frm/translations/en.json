@@ -142,6 +142,9 @@
       },
       "battery_draining": {
         "name": "Batteries draining"
+      },
+      "no_power": {
+        "name": "No power"
       }
     },
     "notify": {

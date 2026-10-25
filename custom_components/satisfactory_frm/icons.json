@@ -1,0 +1,112 @@
+{
+  "entity": {
+    "sensor": {
+      "session_name": {
+        "default": "mdi:content-save"
+      },
+      "play_time": {
+        "default": "mdi:timer-outline"
+      },
+      "game_day": {
+        "default": "mdi:calendar-today"
+      },
+      "days_since_death": {
+        "default": "mdi:skull-outline"
+      },
+      "game_time": {
+        "default": "mdi:clock-outline"
+      },
+      "power_production": {
+        "default": "mdi:transmission-tower-export"
+      },
+      "power_consumed": {
+        "default": "mdi:transmission-tower-import"
+      },
+      "power_capacity": {
+        "default": "mdi:flash"
+      },
+      "power_max_consumed": {
+        "default": "mdi:flash-alert"
+      },
+      "power_headroom": {
+        "default": "mdi:arrow-expand-vertical"
+      },
+      "power_load": {
+        "default": "mdi:gauge"
+      },
+      "battery_differential": {
+        "default": "mdi:battery-sync"
+      },
+      "battery_time_empty": {
+        "default": "mdi:battery-clock"
+      },
+      "battery_time_full": {
+        "default": "mdi:battery-charging"
+      },
+      "item_produced": {
+        "default": "mdi:package-up"
+      },
+      "item_consumed": {
+        "default": "mdi:package-down"
+      },
+      "item_net": {
+        "default": "mdi:plus-minus-variant"
+      },
+      "item_efficiency": {
+        "default": "mdi:speedometer"
+      },
+      "machines_total": {
+        "default": "mdi:factory"
+      },
+      "machines_producing": {
+        "default": "mdi:cog-play"
+      },
+      "machines_idle": {
+        "default": "mdi:cog-pause"
+      },
+      "machines_paused": {
+        "default": "mdi:cog-stop"
+      },
+      "avg_productivity": {
+        "default": "mdi:chart-line"
+      }
+    },
+    "binary_sensor": {
+      "world_ready": {
+        "default": "mdi:earth",
+        "state": {
+          "off": "mdi:earth-off"
+        }
+      },
+      "paused": {
+        "default": "mdi:play",
+        "state": {
+          "on": "mdi:pause"
+        }
+      },
+      "fuse_triggered": {
+        "default": "mdi:fuse",
+        "state": {
+          "on": "mdi:fuse-alert"
+        }
+      },
+      "battery_draining": {
+        "default": "mdi:battery",
+        "state": {
+          "on": "mdi:battery-arrow-down"
+        }
+      },
+      "no_power": {
+        "default": "mdi:power-plug",
+        "state": {
+          "on": "mdi:power-plug-off"
+        }
+      }
+    },
+    "notify": {
+      "game_chat": {
+        "default": "mdi:chat"
+      }
+    }
+  }
+}

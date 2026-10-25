@@ -36,7 +36,11 @@ async def async_setup_entry(
         for cid in data.circuits:
             if (data.save, cid) not in added:
                 added.add((data.save, cid))
-                new += [FuseSensor(fast, data.save, cid), DrainingSensor(fast, data.save, cid)]
+                new += [
+                    FuseSensor(fast, data.save, cid),
+                    NoPowerSensor(fast, data.save, cid),
+                    DrainingSensor(fast, data.save, cid),
+                ]
         if new:
             async_add_entities(new)
 
@@ -145,3 +149,21 @@ class DrainingSensor(_CircuitBinary):
             return float(raw.get("BatteryDifferential") or 0) < 0
         except (TypeError, ValueError):
             return None
+
+
+class NoPowerSensor(_CircuitBinary):
+    """On when the circuit has demand but no generating capacity (dead grid),
+    whether or not the fuse tripped (e.g. generators out of fuel)."""
+
+    _key = "no_power"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    @property
+    def is_on(self) -> bool | None:
+        raw = self._raw
+        try:
+            cap = float(raw.get("PowerCapacity") or 0)
+            demand = max(float(raw.get("PowerMaxConsumed") or 0), float(raw.get("PowerConsumed") or 0))
+        except (TypeError, ValueError):
+            return None
+        return cap <= 0 and demand > 0

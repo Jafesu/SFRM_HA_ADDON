@@ -42,6 +42,7 @@ const SUFFIX = {
   battery_time_empty: "battery_time_until_empty",
   battery_time_full: "battery_time_until_full",
   fuse_triggered: "fuse_tripped",
+  no_power: "no_power",
   battery_draining: "batteries_draining",
   machines_total: "machines",
   machines_producing: "machines_producing",
@@ -76,6 +77,18 @@ const num = (hass, id) => {
 };
 const md = (content) => ({ type: "markdown", content });
 const heading = (text, extra = {}) => ({ type: "heading", heading: text, ...extra });
+const whenOn = (entity) => [{ condition: "state", entity, state: "on" }];
+const warnTile = (entity, name, color) => ({
+  type: "tile", entity, name, color, vertical: false, visibility: whenOn(entity),
+});
+const pausedNote = (srv) =>
+  srv.s.paused
+    ? [{
+        type: "markdown",
+        content: "The server is paused (dedicated servers pause when nobody is online), so power and production read zero until someone joins.",
+        visibility: whenOn(srv.s.paused),
+      }]
+    : [];
 
 function collect(hass) {
   const entities = Object.values(hass.entities || {}).filter((e) => e.platform === DOMAIN);
@@ -148,7 +161,7 @@ function overviewSection(srv, main) {
   const s = srv.s;
   const cards = [
     heading("Overview", {
-      badges: [s.world_ready, s.paused].filter(Boolean).map((entity) => ({ type: "entity", entity })),
+      badges: s.world_ready ? [{ type: "entity", entity: s.world_ready, state_content: "name" }] : [],
     }),
     {
       type: "entities",
@@ -197,24 +210,28 @@ function mapSection(srv, cfg) {
 }
 
 function powerSection(hass, srv) {
-  const cards = [heading("Power")];
+  const cards = [heading("Power"), ...pausedNote(srv)];
   if (!srv.circuits.length) return { type: "grid", cards: [...cards, noSave(hass, srv)] };
   for (const c of srv.circuits) {
     const e = c.e;
+    const hasBatt = !!num(hass, e.battery_capacity);
+    cards.push(heading(c.id !== null ? `Circuit ${c.id}` : c.device.name, { heading_style: "subtitle" }));
+    // Warnings only appear while they apply.
+    if (e.fuse_triggered) cards.push(warnTile(e.fuse_triggered, "Fuse tripped — reset it in game", "red"));
+    if (e.no_power) cards.push(warnTile(e.no_power, "No power — check generators and fuel", "red"));
+    if (e.battery_draining && hasBatt) cards.push(warnTile(e.battery_draining, "Batteries draining", "amber"));
     cards.push(
-      heading(c.id !== null ? `Circuit ${c.id}` : c.device.name, {
-        heading_style: "subtitle",
-        badges: [e.fuse_triggered, e.battery_draining].filter(Boolean).map((entity) => ({ type: "entity", entity })),
-      }),
-      {
-        type: "gauge",
-        entity: e.power_load,
-        name: "Load",
-        min: 0,
-        max: 100,
-        severity: { green: 0, yellow: 75, red: 90 },
-        grid_options: { columns: 4 },
-      },
+      num(hass, e.power_load) !== null
+        ? {
+            type: "gauge",
+            entity: e.power_load,
+            name: "Load",
+            min: 0,
+            max: 100,
+            severity: { green: 0, yellow: 75, red: 90 },
+            grid_options: { columns: 4 },
+          }
+        : { type: "tile", entity: e.power_load, name: "Load", grid_options: { columns: 4 } },
       {
         type: "entities",
         grid_options: { columns: 8 },
@@ -223,8 +240,8 @@ function powerSection(hass, srv) {
           [e.power_consumed, "Using"],
           [e.power_capacity, "Capacity"],
           [e.power_headroom, "Headroom"],
-          [num(hass, e.battery_capacity) ? e.battery_percent : null, "Battery"],
-          [num(hass, e.battery_capacity) ? e.battery_time_empty : null, "Empty in"],
+          [hasBatt ? e.battery_percent : null, "Battery"],
+          [hasBatt ? e.battery_time_empty : null, "Empty in"],
         ]),
       }
     );
@@ -233,7 +250,7 @@ function powerSection(hass, srv) {
 }
 
 function productionSection(hass, srv, cfg) {
-  const cards = [heading("Production")];
+  const cards = [heading("Production"), ...pausedNote(srv)];
   const f = srv.factory;
   if (f.machines_total) {
     cards.push({
