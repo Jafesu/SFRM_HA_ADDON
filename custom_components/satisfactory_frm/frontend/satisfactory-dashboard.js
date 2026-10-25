@@ -265,17 +265,20 @@ function productionSection(hass, srv, cfg) {
       ]),
     });
   }
-  if (!srv.items.length) {
-    cards.push(
-      f.machines_total
-        ? md("No items tracked yet. Choose items under **Settings → Devices & services → Satisfactory → Configure**, and each one gets a card here.")
-        : noSave(hass, srv)
-    );
-    return { type: "grid", cards };
-  }
+  // Every produced item, live, without needing entities.
+  cards.push({
+    type: "custom:satisfactory-production-card",
+    server: srv.entryId,
+    title: "All items",
+    grid_options: { columns: "full" },
+  });
+  // Full cards only for "always track" items (they have produced/consumed sensors);
+  // auto-tracked items are covered by the table, which opens their history on tap.
   for (const [label, e] of srv.items) {
+    if (!e.item_produced) continue;
     cards.push({
       type: "vertical-stack",
+      grid_options: { columns: 6 },
       cards: [
         {
           type: "entities",
@@ -293,7 +296,7 @@ function productionSection(hass, srv, cfg) {
       ],
     });
   }
-  return { type: "grid", cards };
+  return { type: "grid", column_span: 2, cards };
 }
 
 function controlSection(hass, srv) {

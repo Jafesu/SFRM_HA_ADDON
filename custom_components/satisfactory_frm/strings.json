@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Add a Satisfactory server",
-        "description": "Connect to a server running the Ficsit Remote Monitoring mod. The token is only needed for controlling switches and sending chat messages; it's in Configs/FicsitRemoteMonitoring/WebServer.cfg on the server.",
+        "description": "Connect to a server running the Ficsit Remote Monitoring mod. The token is only needed for controlling switches and sending chat messages. Since Satisfactory 1.2 it's in FRM's in-game/server settings (older versions: Configs/FicsitRemoteMonitoring/WebServer.cfg).",
         "data": {
           "host": "Host",
           "port": "FRM port",
@@ -37,14 +37,18 @@
       "init": {
         "title": "Server options",
         "data": {
-          "tracked_items": "Tracked items",
+          "tracked_items": "Always track (all sensors)",
           "token": "FRM auth token",
           "chat_sender": "Chat sender name",
           "scan_interval": "Power and status refresh",
-          "slow_interval": "Production refresh"
+          "slow_interval": "Production refresh",
+          "auto_track": "Auto-track produced items",
+          "excluded_items": "Never track"
         },
         "data_description": {
-          "tracked_items": "Each tracked item gets produced, consumed, net and efficiency sensors."
+          "auto_track": "Creates net and efficiency sensors for every item your factory has machines making. New production lines are picked up automatically.",
+          "tracked_items": "These items get all four sensors: produced, consumed, net and efficiency. Overrides Never track.",
+          "excluded_items": "Skipped by auto-track. Useful for noisy intermediates you don't care about."
         }
       }
     }

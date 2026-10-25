@@ -28,7 +28,12 @@ from homeassistant.helpers.selector import (
 )
 
 from .api import FRMClient, FRMConnectionError, FRMError, FRMNotReady
+from homeassistant.helpers.selector import BooleanSelector
+
 from .const import (
+    CONF_AUTO_TRACK,
+    CONF_EXCLUDED_ITEMS,
+    DEFAULT_AUTO_TRACK,
     CONF_CHAT_SENDER,
     CONF_SCAN_INTERVAL,
     CONF_SLOW_INTERVAL,
@@ -140,7 +145,8 @@ class FRMOptionsFlow(OptionsFlow):
 
         opts = entry.options
         tracked: list[str] = list(opts.get(CONF_TRACKED_ITEMS, []))
-        choices: dict[str, str] = {k: k for k in tracked}
+        excluded: list[str] = list(opts.get(CONF_EXCLUDED_ITEMS, []))
+        choices: dict[str, str] = {k: k for k in tracked + excluded}
         runtime = getattr(entry, "runtime_data", None)
         if runtime and runtime.slow.data:
             for key, raw in runtime.slow.data.prod.items():
@@ -163,11 +169,16 @@ class FRMOptionsFlow(OptionsFlow):
         ]
         token_default = opts.get(CONF_TOKEN, entry.data.get(CONF_TOKEN, ""))
 
+        item_select = SelectSelector(
+            SelectSelectorConfig(options=item_options, multiple=True, custom_value=True)
+        )
         schema = vol.Schema(
             {
-                vol.Optional(CONF_TRACKED_ITEMS, default=tracked): SelectSelector(
-                    SelectSelectorConfig(options=item_options, multiple=True, custom_value=True)
-                ),
+                vol.Optional(
+                    CONF_AUTO_TRACK, default=opts.get(CONF_AUTO_TRACK, DEFAULT_AUTO_TRACK)
+                ): BooleanSelector(),
+                vol.Optional(CONF_TRACKED_ITEMS, default=tracked): item_select,
+                vol.Optional(CONF_EXCLUDED_ITEMS, default=excluded): item_select,
                 vol.Optional(CONF_TOKEN, default=token_default): PASSWORD,
                 vol.Optional(
                     CONF_CHAT_SENDER, default=opts.get(CONF_CHAT_SENDER, DEFAULT_CHAT_SENDER)

@@ -18,8 +18,9 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_TRACKED_ITEMS
-from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
+from homeassistant.helpers import entity_registry as er
+
+from .coordinator import FRMFastCoordinator, FRMSlowCoordinator, item_plan
 from .entity import (
     FRMConfigEntry,
     FRMSaveEntityMixin,
@@ -231,7 +232,6 @@ async def async_setup_entry(
 ) -> None:
     fast = entry.runtime_data.fast
     slow = entry.runtime_data.slow
-    tracked: list[str] = list(entry.options.get(CONF_TRACKED_ITEMS, []))
 
     async_add_entities(SessionSensor(fast, d) for d in SESSION_SENSORS)
 
@@ -251,7 +251,8 @@ async def async_setup_entry(
         if new:
             async_add_entities(new)
 
-    added_slow: set[tuple[str, str]] = set()
+    added_slow: set[tuple[str, str, str]] = set()
+    cleaned_saves: set[str] = set()
 
     @callback
     def _add_slow() -> None:
@@ -260,14 +261,23 @@ async def async_setup_entry(
             return
         save = fdata.save
         new: list[SensorEntity] = []
-        if data.factory and (save, "__factory__") not in added_slow:
-            added_slow.add((save, "__factory__"))
+        if data.factory and (save, "__factory__", "") not in added_slow:
+            added_slow.add((save, "__factory__", ""))
             new.extend(FactorySensor(slow, save, d) for d in FACTORY_SENSORS)
-        for key in tracked:
-            if key in data.prod and (save, key) not in added_slow:
-                added_slow.add((save, key))
-                name = data.prod[key].get("Name") or key
-                new.extend(ItemSensor(slow, save, key, name, d) for d in ITEM_SENSORS)
+
+        plan = item_plan(entry.options, data.prod)
+        if data.prod and save not in cleaned_saves:
+            cleaned_saves.add(save)
+            _remove_unwanted_items(hass, entry, save, plan)
+
+        for key, wanted in plan.items():
+            if key not in data.prod:
+                continue
+            name = data.prod[key].get("Name") or key
+            for d in ITEM_SENSORS:
+                if d.key in wanted and (save, key, d.key) not in added_slow:
+                    added_slow.add((save, key, d.key))
+                    new.append(ItemSensor(slow, save, key, name, d))
         if new:
             async_add_entities(new)
 
@@ -275,6 +285,23 @@ async def async_setup_entry(
     _add_slow()
     entry.async_on_unload(fast.async_add_listener(_add_circuits))
     entry.async_on_unload(slow.async_add_listener(_add_slow))
+
+
+@callback
+def _remove_unwanted_items(
+    hass: HomeAssistant, entry: FRMConfigEntry, save: str, plan: dict[str, tuple[str, ...]]
+) -> None:
+    """Drop item sensors the options no longer ask for (e.g. an item moved to
+    "never track", auto-track switched off, or always -> auto)."""
+    reg = er.async_get(hass)
+    prefix = f"{entry.entry_id}|save:{save}|item:"
+    for ent in er.async_entries_for_config_entry(reg, entry.entry_id):
+        uid = ent.unique_id or ""
+        if not uid.startswith(prefix):
+            continue
+        key, _, desc = uid[len(prefix):].rpartition(":")
+        if desc not in plan.get(key, ()):
+            reg.async_remove(ent.entity_id)
 
 
 class SessionSensor(FRMServerEntity, SensorEntity):

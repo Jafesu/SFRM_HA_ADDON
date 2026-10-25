@@ -11,6 +11,7 @@ FRMSlowCoordinator  - production stats + factory summary (default 60 s). Only po
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
@@ -43,6 +44,45 @@ def circuit_id(raw: dict[str, Any]) -> int | None:
 
 def item_key(raw: dict[str, Any]) -> str | None:
     return raw.get("ClassName") or raw.get("Name")
+
+
+def _f(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def is_produced(raw: dict[str, Any]) -> bool:
+    """True if the factory has machines set up to make this item.
+
+    Uses MaxProd (capacity), so it still works while grids are dead or paused.
+    """
+    return _f(raw.get("MaxProd")) > 0 or _f(raw.get("CurrentProd")) > 0
+
+
+def item_plan(options: Mapping[str, Any], prod: dict[str, dict[str, Any]]) -> dict[str, tuple[str, ...]]:
+    """Which item sensors should exist: {item_key: sensor description keys}.
+
+    - "Always track" items get all four sensors.
+    - With auto-track on, every produced item gets net + efficiency.
+    - "Never track" wins over auto-track (but not over always-track).
+    """
+    from .const import (  # noqa: PLC0415
+        ALL_ITEM_SENSORS, AUTO_ITEM_SENSORS, CONF_AUTO_TRACK,
+        CONF_EXCLUDED_ITEMS, CONF_TRACKED_ITEMS, DEFAULT_AUTO_TRACK,
+    )
+
+    always = set(options.get(CONF_TRACKED_ITEMS, []))
+    excluded = set(options.get(CONF_EXCLUDED_ITEMS, []))
+    plan: dict[str, tuple[str, ...]] = {}
+    if options.get(CONF_AUTO_TRACK, DEFAULT_AUTO_TRACK):
+        for key, raw in prod.items():
+            if key not in excluded and is_produced(raw):
+                plan[key] = AUTO_ITEM_SENSORS
+    for key in always:
+        plan[key] = ALL_ITEM_SENSORS
+    return plan
 
 
 @dataclass

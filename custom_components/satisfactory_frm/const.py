@@ -9,7 +9,12 @@ DOMAIN: Final = "satisfactory_frm"
 CONF_TOKEN: Final = "token"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_SLOW_INTERVAL: Final = "slow_interval"
-CONF_TRACKED_ITEMS: Final = "tracked_items"
+CONF_TRACKED_ITEMS: Final = "tracked_items"  # always track, all sensors
+CONF_AUTO_TRACK: Final = "auto_track"
+CONF_EXCLUDED_ITEMS: Final = "excluded_items"
+DEFAULT_AUTO_TRACK: Final = True
+ALL_ITEM_SENSORS: Final = ("item_produced", "item_consumed", "item_net", "item_efficiency")
+AUTO_ITEM_SENSORS: Final = ("item_net", "item_efficiency")
 CONF_CHAT_SENDER: Final = "chat_sender"
 
 DEFAULT_PORT: Final = 8080
@@ -24,6 +29,7 @@ AUTH_HEADER: Final = "X-FRM-Authorization"
 # Map card
 CARD_URL: Final = f"/{DOMAIN}/satisfactory-map-card.js"
 DASHBOARD_URL: Final = f"/{DOMAIN}/satisfactory-dashboard.js"
+PRODUCTION_CARD_URL: Final = f"/{DOMAIN}/satisfactory-production-card.js"
 # World bounds of /map/map.avif in game units (cm), taken from FRM's web UI.
 MAP_BOUNDS: Final = (-324698.16796875, -375000.0, 425301.83203125, 375000.0)
 # Only these web-UI asset prefixes may be proxied through HA.

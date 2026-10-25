@@ -26,6 +26,7 @@ from .const import (
     ASSET_PREFIXES,
     CARD_URL,
     DASHBOARD_URL,
+    PRODUCTION_CARD_URL,
     CONF_SCAN_INTERVAL,
     CONF_SLOW_INTERVAL,
     CONF_TOKEN,
@@ -35,7 +36,7 @@ from .const import (
     MAP_BOUNDS,
     MAP_LAYERS,
 )
-from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
+from .coordinator import FRMFastCoordinator, FRMSlowCoordinator, is_produced
 from .entity import FRMConfigEntry, FRMRuntime, server_device
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.2.3"
+CARD_VERSION = "0.3.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -65,11 +66,16 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         [StaticPathConfig(DASHBOARD_URL, str(Path(__file__).parent / "frontend" / "satisfactory-dashboard.js"), cache_headers=False)]
     )
     add_extra_js_url(hass, f"{DASHBOARD_URL}?v={CARD_VERSION}")
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(PRODUCTION_CARD_URL, str(Path(__file__).parent / "frontend" / "satisfactory-production-card.js"), cache_headers=False)]
+    )
+    add_extra_js_url(hass, f"{PRODUCTION_CARD_URL}?v={CARD_VERSION}")
     hass.http.register_view(FRMAssetView())
 
     websocket_api.async_register_command(hass, ws_servers)
     websocket_api.async_register_command(hass, ws_map_info)
     websocket_api.async_register_command(hass, ws_map_layer)
+    websocket_api.async_register_command(hass, ws_production)
 
     async def _purge(call: ServiceCall) -> None:
         await async_purge_inactive_saves(hass, call.data.get("entry_id"))
@@ -269,3 +275,59 @@ async def ws_map_layer(
         connection.send_error(msg["id"], "frm_error", str(err))
         return
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "satisfactory_frm/production", vol.Required("entry_id"): str}
+)
+@callback
+def ws_production(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """All items from the last production poll (no extra FRM request)."""
+    entry = _loaded_entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "Server not loaded")
+        return
+    fast, slow = entry.runtime_data.fast.data, entry.runtime_data.slow.data
+    ready = bool(fast and fast.world_ready and slow and slow.session_name == fast.session_name)
+    save = fast.save if fast else None
+
+    # item key -> net sensor entity, so the card can open history on tap.
+    net_entities: dict[str, str] = {}
+    if save:
+        prefix = f"{entry.entry_id}|save:{save}|item:"
+        for ent in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id):
+            uid = ent.unique_id or ""
+            if uid.startswith(prefix) and uid.endswith(":item_net"):
+                net_entities[uid[len(prefix):-len(":item_net")]] = ent.entity_id
+
+    def f(v: Any) -> float:
+        try:
+            return round(float(v), 2)
+        except (TypeError, ValueError):
+            return 0.0
+
+    items = []
+    if ready:
+        for key, raw in slow.prod.items():
+            items.append(
+                {
+                    "key": key,
+                    "class_name": raw.get("ClassName"),
+                    "name": raw.get("Name") or key,
+                    "produced": f(raw.get("CurrentProd")),
+                    "consumed": f(raw.get("CurrentConsumed")),
+                    "max_produced": f(raw.get("MaxProd")),
+                    "max_consumed": f(raw.get("MaxConsumed")),
+                    "is_produced": is_produced(raw),
+                    "net_entity": net_entities.get(key),
+                }
+            )
+    connection.send_result(
+        msg["id"],
+        {
+            "title": entry.title,
+            "world_ready": bool(fast and fast.world_ready),
+            "session_name": fast.session_name if fast else None,
+            "items": items,
+        },
+    )

@@ -10,8 +10,10 @@ notifications and a live factory map card.
 - Home Assistant 2025.3 or newer
 - FRM installed on the server with its web server running (autostart it in
   `GameUserSettings.ini` on dedicated servers)
-- Optional: the FRM auth token (`Configs/FicsitRemoteMonitoring/WebServer.cfg`) for
-  switch control and chat messages. Reading data needs no token.
+- Optional: the FRM auth token, for switch control and chat messages. Reading data
+  needs no token. Since Satisfactory 1.2, FRM keeps its settings (including the
+  token) in the game's user settings rather than the old
+  `Configs/FicsitRemoteMonitoring/WebServer.cfg`, which is now reference-only.
 
 ## Install
 
@@ -38,9 +40,14 @@ the entry rather than re-adding it.
   consumption, headroom, load %, battery charge/differential/time to empty/full,
   fuse tripped, batteries draining
 - Power switches as switch entities; priority switches also get a 0–8 priority number
-- Production: pick items in the integration options; each gets produced/min,
-  consumed/min, net/min and efficiency %. Plus a factory summary (machines
-  producing, idle, paused, average productivity)
+- Production sensors, chosen in the integration's **Configure** options:
+  - **Auto-track produced items** (on by default): every item your factory has
+    machines making gets **net** and **efficiency** sensors. New production lines
+    are picked up automatically.
+  - **Always track**: items that get all four sensors (produced, consumed, net,
+    efficiency). Overrides Never track.
+  - **Never track**: items auto-track should skip.
+- Factory summary: machines producing, idle, paused, average productivity
 
 When a different save loads, the old save's entities go unavailable and come back
 with their history if you load that save again. To remove them for good, run the
@@ -61,8 +68,8 @@ strategy:
 ```
 
 You get one tab per server with Overview, Map, Power (a card per circuit, largest
-first, fuse and battery badges), Production (factory summary plus a card and 24 h
-graph per tracked item) and Control (switches, priorities, game chat box).
+first, fuse and battery badges), Production (factory summary, the full production
+table, and a card with a 24 h graph for each "always track" item) and Control (switches, priorities, game chat box).
 
 Options:
 
@@ -89,6 +96,21 @@ doesn't help, add it as a resource manually: **Settings → Dashboards → ⋮ �
 Resources → Add resource**, URL `/satisfactory_frm/satisfactory-dashboard.js`,
 type JavaScript module. (Do the same with `/satisfactory_frm/satisfactory-map-card.js`
 if the map card ever shows as a custom element error.)
+
+## Production table card
+
+Every item your factory makes, live, with search, sorting and filters
+(All / Short / Surplus / Stopped). It creates no entities and makes no extra requests
+to FRM. Tap a row to open that item's history (when it has a net sensor).
+
+```yaml
+type: custom:satisfactory-production-card
+server: My Server   # optional
+sort: net           # net (shortfalls first) | name | produced | consumed
+filter: all         # all | deficit | surplus | stopped
+show_all: false     # also list items nothing makes or uses
+max_height: 520
+```
 
 ## Map card
 
