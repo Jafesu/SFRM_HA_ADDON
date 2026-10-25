@@ -4,16 +4,18 @@
   "after_dependencies": [
     "frontend"
   ],
-  "codeowners": [],
+  "codeowners": [
+    "@Jafesu"
+  ],
   "config_flow": true,
   "dependencies": [
     "http",
     "websocket_api"
   ],
-  "documentation": "https://github.com/porisius/FicsitRemoteMonitoring",
+  "documentation": "https://github.com/Jafesu/SFRM_HA_ADDON",
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/porisius/FicsitRemoteMonitoring/issues",
+  "issue_tracker": "https://github.com/Jafesu/SFRM_HA_ADDON/issues",
   "requirements": [],
-  "version": "0.2.1"
+  "version": "0.2.3"
 }

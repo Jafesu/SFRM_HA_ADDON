@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -52,7 +54,8 @@ def save_device(
         name=f"{entry.title} {name}",
         manufacturer="Coffee Stain Studios",
         model=model,
-        via_device=(DOMAIN, entry.entry_id),
+        # Parent link is set by registry ID in FRMSaveEntityMixin (HA deprecated
+        # passing via_device here).
     )
 
 
@@ -74,9 +77,26 @@ class FRMServerEntity(CoordinatorEntity["FRMFastCoordinator"]):
 
 
 class FRMSaveEntityMixin:
-    """Availability rule shared by all save-level entities."""
+    """Availability rule and parent-device link shared by all save-level entities."""
 
     _save: str
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()  # type: ignore[misc]
+        self._link_to_server()
+
+    def _link_to_server(self) -> None:
+        """Point this entity's device at the server device via via_device_id."""
+        hass = self.hass  # type: ignore[attr-defined]
+        entry = self.coordinator.config_entry  # type: ignore[attr-defined]
+        ent = er.async_get(hass).async_get(self.entity_id)  # type: ignore[attr-defined]
+        if not ent or not ent.device_id:
+            return
+        dev_reg = dr.async_get(hass)
+        server = dev_reg.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+        device = dev_reg.async_get(ent.device_id)
+        if server and device and device.via_device_id != server.id:
+            dev_reg.async_update_device(device.id, via_device_id=server.id)
 
     def _save_loaded(self, fast_coordinator: FRMFastCoordinator) -> bool:
         data = fast_coordinator.data

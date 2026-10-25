@@ -36,7 +36,7 @@ from .const import (
     MAP_LAYERS,
 )
 from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
-from .entity import FRMConfigEntry, FRMRuntime
+from .entity import FRMConfigEntry, FRMRuntime, server_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.2.1"
+CARD_VERSION = "0.2.3"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -101,6 +101,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: FRMConfigEntry) -> bool:
     await slow.async_config_entry_first_refresh()
 
     entry.runtime_data = FRMRuntime(client=client, fast=fast, slow=slow, asset_cache={})
+    # Make sure the server device exists before save-level devices link to it.
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, **server_device(entry, client.base_url)
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True

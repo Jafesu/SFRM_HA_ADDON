@@ -679,9 +679,9 @@ class SatisfactoryMapCard extends HTMLElement {
   }
 }
 
-customElements.define("satisfactory-map-card", SatisfactoryMapCard);
+if (!customElements.get("satisfactory-map-card")) customElements.define("satisfactory-map-card", SatisfactoryMapCard);
 window.customCards = window.customCards || [];
-window.customCards.push({
+if (!window.customCards.some((c) => c.type === "satisfactory-map-card")) window.customCards.push({
   type: "satisfactory-map-card",
   name: "Satisfactory map",
   description: "Live factory map from Ficsit Remote Monitoring",

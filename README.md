@@ -80,6 +80,16 @@ New circuits and items appear on the next page load. To customise freely, use
 **⋮ → Take control** to convert it into a normal dashboard (it then stops
 updating itself).
 
+### If the dashboard says "Timeout waiting for strategy element"
+
+The browser hasn't loaded the dashboard script, usually because of a cached page
+after an update or restart. Hard-refresh (Ctrl+Shift+R), or in the companion app
+use **Settings → Companion app → Debugging → Reset frontend cache**. If that
+doesn't help, add it as a resource manually: **Settings → Dashboards → ⋮ →
+Resources → Add resource**, URL `/satisfactory_frm/satisfactory-dashboard.js`,
+type JavaScript module. (Do the same with `/satisfactory_frm/satisfactory-map-card.js`
+if the map card ever shows as a custom element error.)
+
 ## Map card
 
 The card is registered automatically. Add it with:
@@ -100,6 +110,12 @@ circuit with a tripped fuse are drawn red. Zoom in to see building footprints.
 
 Options: `layers` (list of layer IDs to show by default), `fast_interval`,
 `slow_interval`, `min_z` / `max_z` (height filter in cm), `title`.
+
+## Issues
+
+Report problems at https://github.com/Jafesu/SFRM_HA_ADDON/issues (not on the FRM mod's
+repository). Please include your HA version, FRM version, and any log lines from
+`custom_components.satisfactory_frm`.
 
 ## Security
 

@@ -99,7 +99,8 @@ function collect(hass) {
     byDevice.get(e.device_id).push(e);
   }
   const devices = [...byDevice.keys()].map((id) => hass.devices?.[id]).filter(Boolean);
-  const servers = devices.filter((d) => !d.via_device_id);
+  const CHILD_MODELS = new Set(["Power circuit", "Production", "Power switches"]);
+  const servers = devices.filter((d) => !d.via_device_id && !CHILD_MODELS.has(d.model));
 
   return servers.map((server) => {
     const keyed = (list) => Object.fromEntries(list.map((e) => [keyOf(e), e.entity_id]).filter(([k]) => k));
@@ -370,5 +371,5 @@ class SatisfactoryDashboardStrategy extends HTMLElement {
   }
 }
 
-customElements.define("ll-strategy-dashboard-satisfactory", SatisfactoryDashboardStrategy);
+if (!customElements.get("ll-strategy-dashboard-satisfactory")) customElements.define("ll-strategy-dashboard-satisfactory", SatisfactoryDashboardStrategy);
 console.info("%c satisfactory dashboard strategy ", "background:#f99b38;color:#000");
