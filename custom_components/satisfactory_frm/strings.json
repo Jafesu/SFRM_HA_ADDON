@@ -1,0 +1,165 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a Satisfactory server",
+        "description": "Connect to a server running the Ficsit Remote Monitoring mod. The token is only needed for controlling switches and sending chat messages; it's in Configs/FicsitRemoteMonitoring/WebServer.cfg on the server.",
+        "data": {
+          "host": "Host",
+          "port": "FRM port",
+          "token": "FRM auth token",
+          "name": "Display name"
+        },
+        "data_description": {
+          "name": "Leave empty to use the current save name. Used as the device and entity name prefix and never changes automatically."
+        }
+      },
+      "reconfigure": {
+        "title": "Change server address",
+        "data": {
+          "host": "Host",
+          "port": "FRM port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Can't reach FRM at that address. Check the host and port, and that the FRM web server is running.",
+      "already_configured": "Another entry already uses this host and port.",
+      "unknown": "FRM answered, but with something unexpected. Check the logs."
+    },
+    "abort": {
+      "already_configured": "This server is already added.",
+      "reconfigure_successful": "Server address updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Server options",
+        "data": {
+          "tracked_items": "Tracked items",
+          "token": "FRM auth token",
+          "chat_sender": "Chat sender name",
+          "scan_interval": "Power and status refresh",
+          "slow_interval": "Production refresh"
+        },
+        "data_description": {
+          "tracked_items": "Each tracked item gets produced, consumed, net and efficiency sensors."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "session_name": {
+        "name": "Session name"
+      },
+      "play_time": {
+        "name": "Play time"
+      },
+      "game_day": {
+        "name": "In-game day"
+      },
+      "days_since_death": {
+        "name": "Days since last death"
+      },
+      "game_time": {
+        "name": "In-game time"
+      },
+      "power_production": {
+        "name": "Power production"
+      },
+      "power_consumed": {
+        "name": "Power consumed"
+      },
+      "power_capacity": {
+        "name": "Power capacity"
+      },
+      "power_max_consumed": {
+        "name": "Max power consumption"
+      },
+      "power_headroom": {
+        "name": "Power headroom"
+      },
+      "power_load": {
+        "name": "Power load"
+      },
+      "battery_differential": {
+        "name": "Battery differential"
+      },
+      "battery_percent": {
+        "name": "Battery charge"
+      },
+      "battery_capacity": {
+        "name": "Battery capacity"
+      },
+      "battery_time_empty": {
+        "name": "Battery time until empty"
+      },
+      "battery_time_full": {
+        "name": "Battery time until full"
+      },
+      "item_produced": {
+        "name": "{item} produced"
+      },
+      "item_consumed": {
+        "name": "{item} consumed"
+      },
+      "item_net": {
+        "name": "{item} net"
+      },
+      "item_efficiency": {
+        "name": "{item} efficiency"
+      },
+      "machines_total": {
+        "name": "Machines"
+      },
+      "machines_producing": {
+        "name": "Machines producing"
+      },
+      "machines_idle": {
+        "name": "Machines idle"
+      },
+      "machines_paused": {
+        "name": "Machines paused"
+      },
+      "avg_productivity": {
+        "name": "Average productivity"
+      }
+    },
+    "binary_sensor": {
+      "reachable": {
+        "name": "Server reachable"
+      },
+      "world_ready": {
+        "name": "World ready"
+      },
+      "paused": {
+        "name": "Game paused"
+      },
+      "fuse_triggered": {
+        "name": "Fuse tripped"
+      },
+      "battery_draining": {
+        "name": "Batteries draining"
+      }
+    },
+    "notify": {
+      "game_chat": {
+        "name": "Game chat"
+      }
+    }
+  },
+  "services": {
+    "purge_inactive_saves": {
+      "name": "Remove inactive save entities",
+      "description": "Permanently removes entities and devices that belong to saves other than the one currently loaded.",
+      "fields": {
+        "entry_id": {
+          "name": "Server",
+          "description": "Limit to one server. Leave empty for all."
+        }
+      }
+    }
+  }
+}

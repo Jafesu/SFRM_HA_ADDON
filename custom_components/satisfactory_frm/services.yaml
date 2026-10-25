@@ -1,0 +1,7 @@
+purge_inactive_saves:
+  fields:
+    entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: satisfactory_frm

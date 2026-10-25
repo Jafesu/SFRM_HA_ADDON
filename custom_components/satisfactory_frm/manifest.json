@@ -1,0 +1,14 @@
+{
+  "domain": "satisfactory_frm",
+  "name": "Satisfactory (Ficsit Remote Monitoring)",
+  "after_dependencies": ["frontend"],
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["http", "websocket_api"],
+  "documentation": "https://github.com/porisius/FicsitRemoteMonitoring",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/porisius/FicsitRemoteMonitoring/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

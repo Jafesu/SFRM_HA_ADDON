@@ -1,0 +1,47 @@
+# A starter dashboard view. Paste into a dashboard's raw configuration editor
+# (under "views:"), then fix entity IDs to match yours.
+title: Satisfactory
+path: satisfactory
+type: sections
+sections:
+  - title: Factory map
+    column_span: 2
+    cards:
+      - type: custom:satisfactory-map-card
+        # server: My Server      # display name or entry ID; defaults to the first server
+        height: 480
+        # layers: [players, trains, train_rails, drones, factory, switches]
+        # fast_interval: 5       # seconds, moving things
+        # slow_interval: 60      # seconds, buildings/belts/rails
+        # min_z: -25000          # optional height filter in cm
+        # max_z: 200000
+  - title: Server
+    cards:
+      - type: entities
+        entities:
+          - binary_sensor.myserver_server_reachable
+          - binary_sensor.myserver_world_ready
+          - binary_sensor.myserver_game_paused
+          - sensor.myserver_session_name
+          - sensor.myserver_in_game_time
+          - sensor.myserver_play_time
+  - title: Main grid
+    cards:
+      - type: gauge
+        entity: sensor.myserver_circuit_1_power_load
+        name: Load
+        severity: {green: 0, yellow: 75, red: 90}
+      - type: entities
+        entities:
+          - sensor.myserver_circuit_1_power_production
+          - sensor.myserver_circuit_1_power_consumed
+          - sensor.myserver_circuit_1_power_headroom
+          - sensor.myserver_circuit_1_battery_charge
+          - binary_sensor.myserver_circuit_1_fuse_tripped
+  - title: Production
+    cards:
+      - type: entities
+        entities:
+          - sensor.myserver_production_machines_producing
+          - sensor.myserver_production_machines_idle
+          - sensor.myserver_production_average_productivity

@@ -1,0 +1,53 @@
+# Replace "myserver" with your server's entity prefix (the display name you chose)
+# and circuit numbers with your own. Check Settings > Devices for real entity IDs.
+
+- alias: Satisfactory - fuse tripped
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.myserver_circuit_1_fuse_tripped
+      to: "on"
+  actions:
+    - action: notify.notify
+      data:
+        title: Satisfactory
+        message: "Fuse tripped on circuit 1"
+    - action: notify.send_message
+      target:
+        entity_id: notify.myserver_game_chat
+      data:
+        message: "⚡ Fuse tripped on circuit 1. Someone reset it please!"
+
+- alias: Satisfactory - world stuck loading
+  description: FRM sometimes keeps answering "World not ready" after the nightly reload.
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.myserver_world_ready
+      to: "off"
+      for: "00:10:00"
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.myserver_server_reachable
+      state: "on"
+  actions:
+    - action: notify.notify
+      data:
+        message: "Satisfactory world has not been ready for 10 minutes. A server restart usually fixes it."
+
+- alias: Satisfactory - shed load on low battery
+  triggers:
+    - trigger: numeric_state
+      entity_id: sensor.myserver_circuit_1_battery_charge
+      below: 20
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.myserver_circuit_1_batteries_draining
+      state: "on"
+  actions:
+    - action: switch.turn_off
+      target:
+        entity_id: switch.myserver_power_switches_non_essential
+    - action: notify.send_message
+      target:
+        entity_id: notify.myserver_game_chat
+      data:
+        message: "🔋 Batteries below 20%. Non-essential grid switched off by Home Assistant."
