@@ -118,6 +118,14 @@ class FRMClient:
         self._require_token()
         return await self._request("POST", "setSwitches", {"ID": switch_id, "priority": priority})
 
+    async def set_enabled(self, building_id: str, enabled: bool) -> Any:
+        """Run (True) or stand by (False) a factory building.
+
+        VERIFY: payload assumed to mirror setSwitches ({"ID", "status"}); see CLAUDE.md.
+        """
+        self._require_token()
+        return await self._request("POST", "setEnabled", {"ID": building_id, "status": enabled})
+
     async def send_chat(self, message: str, sender: str) -> Any:
         self._require_token()
         return await self._request("POST", "sendChatMessage", {"message": message, "sender": sender})

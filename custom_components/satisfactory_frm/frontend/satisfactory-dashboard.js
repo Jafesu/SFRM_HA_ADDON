@@ -6,7 +6,7 @@
  *     type: custom:satisfactory
  *     # server: My Server        # one server only (display name or entry ID)
  *     # main_circuit: 1          # headline grid; default = largest capacity
- *     # hide: [map, control]     # overview | map | power | production | control
+ *     # hide: [map, control]     # overview | map | power | production | buildings | control
  *     # history_hours: 24
  *     # map_height: 460
  *
@@ -99,7 +99,7 @@ function collect(hass) {
     byDevice.get(e.device_id).push(e);
   }
   const devices = [...byDevice.keys()].map((id) => hass.devices?.[id]).filter(Boolean);
-  const CHILD_MODELS = new Set(["Power circuit", "Production", "Power switches"]);
+  const CHILD_MODELS = new Set(["Power circuit", "Production", "Power switches", "Building group", "Production lines"]);
   const servers = devices.filter((d) => !d.via_device_id && !CHILD_MODELS.has(d.model));
 
   return servers.map((server) => {
@@ -129,6 +129,28 @@ function collect(hass) {
       items.get(label)[k] = e.entity_id;
     }
 
+    const buildingGroups = active
+      .filter((d) => d.model === "Building group")
+      .map((d) => {
+        const ents = byDevice.get(d.id);
+        const dn = d.name_by_user || d.name || "";
+        const label = dn.startsWith(name + " ") ? dn.slice(name.length + 1) : dn;
+        const switches = ents
+          .filter((e) => e.entity_id.startsWith("switch."))
+          .map((e) => {
+            const fn = hass.states[e.entity_id]?.attributes?.friendly_name || e.entity_id;
+            return { id: e.entity_id, name: fn.startsWith(dn + " ") ? fn.slice(dn.length + 1) : fn };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        return { label, switches };
+      })
+      .filter((g) => g.switches.length)
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const linesDev = active.find((d) => d.model === "Production lines");
+    const lines = linesDev
+      ? byDevice.get(linesDev.id).map((e) => e.entity_id).filter((id) => id.startsWith("switch.")).sort()
+      : [];
+
     const switchDev = active.find((d) => d.model === "Power switches");
     const switchEnts = switchDev ? byDevice.get(switchDev.id) : [];
 
@@ -139,6 +161,8 @@ function collect(hass) {
       circuits,
       factory: keyed(prodEnts),
       items: [...items.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+      buildingGroups,
+      lines,
       switches: switchEnts.filter((e) => e.entity_id.startsWith("switch.")).map((e) => e.entity_id).sort(),
       priorities: switchEnts.filter((e) => e.entity_id.startsWith("number.")).map((e) => e.entity_id).sort(),
     };
@@ -320,6 +344,41 @@ function controlSection(hass, srv) {
   return { type: "grid", cards };
 }
 
+function buildingsSection(hass, srv) {
+  const cards = [heading("Buildings")];
+  if (!srv.buildingGroups.length) {
+    cards.push(
+      srv.circuits.length
+        ? md("No building entities. Turn on **Create building entities** in the integration's options (Settings → Devices & services → Satisfactory → Configure).")
+        : noSave(hass, srv)
+    );
+    return { type: "grid", column_span: 2, cards };
+  }
+  if (srv.lines.length) {
+    cards.push({
+      type: "entities",
+      title: "Production lines",
+      state_color: true,
+      entities: srv.lines,
+      footer: undefined,
+    });
+    cards.push(md("Turning a line off puts every building on that recipe into standby (no power draw)."));
+  }
+  for (const g of srv.buildingGroups) {
+    cards.push(heading(`${g.label} (${g.switches.length})`, { heading_style: "subtitle" }));
+    for (const sw of g.switches) {
+      cards.push({
+        type: "tile",
+        entity: sw.id,
+        name: sw.name,
+        state_content: ["status_label", "state"],
+        grid_options: { columns: 6 },
+      });
+    }
+  }
+  return { type: "grid", column_span: 2, cards };
+}
+
 function buildView(hass, srv, cfg) {
   const hide = new Set(cfg.hide || []);
   const main =
@@ -330,6 +389,7 @@ function buildView(hass, srv, cfg) {
   if (!hide.has("map")) sections.push(mapSection(srv, cfg));
   if (!hide.has("power")) sections.push(powerSection(hass, srv));
   if (!hide.has("production")) sections.push(productionSection(hass, srv, cfg));
+  if (!hide.has("buildings")) sections.push(buildingsSection(hass, srv));
   if (!hide.has("control")) sections.push(controlSection(hass, srv));
   return {
     title: srv.name,

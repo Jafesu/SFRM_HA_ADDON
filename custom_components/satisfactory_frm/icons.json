@@ -69,6 +69,16 @@
       },
       "avg_productivity": {
         "default": "mdi:chart-line"
+      },
+      "building_status": {
+        "default": "mdi:factory",
+        "state": {
+          "producing": "mdi:cog-play",
+          "idle": "mdi:cog-pause",
+          "paused": "mdi:pause-circle",
+          "no_power": "mdi:power-plug-off",
+          "not_configured": "mdi:cog-off"
+        }
       }
     },
     "binary_sensor": {

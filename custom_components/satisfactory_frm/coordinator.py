@@ -106,6 +106,10 @@ class SlowData:
     session_name: str | None = None
     prod: dict[str, dict[str, Any]] = field(default_factory=dict)
     factory: dict[str, Any] = field(default_factory=dict)
+    # Every controllable building by FRM ID; each raw dict gets "_kind":
+    # "factory" | "extractor" | "generator".
+    machines: dict[str, dict[str, Any]] = field(default_factory=dict)
+    machines_ok: bool = False  # True only if all building lists loaded
 
 
 class FRMFastCoordinator(DataUpdateCoordinator[FastData]):
@@ -243,11 +247,25 @@ class FRMSlowCoordinator(DataUpdateCoordinator[SlowData]):
         except FRMError as err:
             _LOGGER.debug("getProdStats failed: %s", err)
 
-        try:
-            data.factory = summarize_factory(await self.client.get_list("getFactory"))
-        except FRMError as err:
-            _LOGGER.debug("getFactory failed: %s", err)
-
+        results = await asyncio.gather(
+            self.client.get_list("getFactory"),
+            self.client.get_list("getExtractor"),
+            self.client.get_list("getGenerators"),
+            return_exceptions=True,
+        )
+        ok = True
+        for kind, result in zip(("factory", "extractor", "generator"), results):
+            if isinstance(result, BaseException):
+                ok = False
+                _LOGGER.debug("Building list %s failed: %s", kind, result)
+                continue
+            if kind == "factory":
+                data.factory = summarize_factory(result)
+            for raw in result:
+                bid = raw.get("ID")
+                if bid:
+                    data.machines[str(bid)] = {**raw, "_kind": kind}
+        data.machines_ok = ok
         return data
 
 

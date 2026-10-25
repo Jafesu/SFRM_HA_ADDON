@@ -20,6 +20,16 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from homeassistant.helpers import entity_registry as er
 
+from .buildings import (
+    STATUSES,
+    building_names,
+    recipe_of,
+    remove_all_building_entities,
+    remove_stale_buildings,
+    status_of,
+    type_name,
+)
+from .const import CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES
 from .coordinator import FRMFastCoordinator, FRMSlowCoordinator, item_plan
 from .entity import (
     FRMConfigEntry,
@@ -253,6 +263,10 @@ async def async_setup_entry(
 
     added_slow: set[tuple[str, str, str]] = set()
     cleaned_saves: set[str] = set()
+    cleaned_buildings: set[str] = set()
+    buildings_on = entry.options.get(CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES)
+    if not buildings_on:
+        remove_all_building_entities(hass, entry)
 
     @callback
     def _add_slow() -> None:
@@ -278,6 +292,17 @@ async def async_setup_entry(
                 if d.key in wanted and (save, key, d.key) not in added_slow:
                     added_slow.add((save, key, d.key))
                     new.append(ItemSensor(slow, save, key, name, d))
+        if buildings_on and data.machines:
+            if data.machines_ok and save not in cleaned_buildings:
+                cleaned_buildings.add(save)
+                remove_stale_buildings(hass, entry, save, data.machines)
+            names = None
+            for bid, raw in data.machines.items():
+                if (save, bid, "building") in added_slow:
+                    continue
+                names = names or building_names(data.machines)
+                added_slow.add((save, bid, "building"))
+                new.append(BuildingStatusSensor(slow, save, bid, names[bid], raw))
         if new:
             async_add_entities(new)
 
@@ -399,3 +424,57 @@ class FactorySensor(_SlowSaveSensor):
     @property
     def native_value(self) -> Any:
         return self.entity_description.value_fn(self.coordinator.data.factory)
+
+
+class BuildingStatusSensor(FRMSaveEntityMixin, CoordinatorEntity[FRMSlowCoordinator], SensorEntity):
+    """Producing / idle / paused / no power / not configured, with machine details."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = STATUSES
+    _attr_translation_key = "building_status"
+
+    def __init__(self, coordinator, save: str, bid: str, label: str, raw: dict[str, Any]) -> None:
+        super().__init__(coordinator)
+        entry = coordinator.config_entry
+        self._save, self._bid = save, bid
+        self._attr_name = f"{label} status"
+        self._attr_unique_id = save_uid(entry, save, f"building:{bid}:status")
+        self._attr_device_info = save_device(
+            entry, save, f"type:{raw.get('ClassName', 'building')}", type_name(raw), "Building group"
+        )
+
+    @property
+    def available(self) -> bool:
+        slow = self.coordinator.data
+        return (
+            super().available
+            and self._save_loaded(self.coordinator.fast)
+            and slow is not None
+            and slow.session_name == self.coordinator.fast.data.session_name
+            and self._bid in slow.machines
+        )
+
+    @property
+    def native_value(self) -> str:
+        return status_of(self.coordinator.data.machines[self._bid], self.coordinator.fast.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        raw = self.coordinator.data.machines[self._bid]
+        power = raw.get("PowerInfo") or {}
+        attrs = {
+            "building": type_name(raw),
+            "recipe": recipe_of(raw),
+            "frm_id": self._bid,
+            "productivity": _num(raw.get("Productivity")),
+            "clock_speed": _num(raw.get("ManuSpeed")),
+            "power_draw_mw": _num(power.get("PowerConsumed")),
+            "circuit": power.get("CircuitGroupID"),
+            "power_shards": raw.get("PowerShards"),
+            "somersloops": raw.get("Somersloops"),
+        }
+        if raw.get("_kind") == "generator":
+            attrs["base_output_mw"] = _num(raw.get("BaseProd"))
+            attrs["fuel_amount"] = raw.get("FuelAmount")
+        return {k: v for k, v in attrs.items() if v is not None}

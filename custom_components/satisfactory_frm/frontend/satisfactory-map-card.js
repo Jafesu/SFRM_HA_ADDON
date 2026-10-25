@@ -10,7 +10,7 @@
  * "deck" space (x, -y), with the map image spanning MAP_BOUNDS = [left, bottom, right, top].
  */
 
-const VERSION = "0.1.0";
+const VERSION = "0.4.0";
 
 const LAYERS = {
   // id: [label, default visible]
@@ -638,7 +638,7 @@ class SatisfactoryMapCard extends HTMLElement {
         ["Productivity", pct(o.Productivity)], ["Clock", pct(o.ManuSpeed)],
         ["Circuit", o.PowerInfo?.CircuitGroupID === -1 ? "Disconnected" : o.PowerInfo?.CircuitGroupID],
       ];
-      case "generators": return [["Base output", o.BaseProd != null ? `${o.BaseProd} MW` : null], ["Fuel", o.FuelAmount], ["Full speed", yes(o.IsFullSpeed)]];
+      case "generators": return [["Base output", o.BaseProd != null ? `${o.BaseProd} MW` : null], ["Fuel", o.FuelAmount], ["Full speed", yes(o.IsFullSpeed)], ["Standby", yes(o.IsPaused)]];
       case "switches": return [["State", (o.IsOn ?? o.SwitchOn) ? "On" : "Off"], ["Priority", o.Priority]];
       case "train_stations": return [["Transfer rate", o.TransferRate], ["Inflow", o.InflowRate], ["Outflow", o.OutflowRate]];
       case "drone_stations": return [["Paired with", o.PairedStation]];
@@ -654,24 +654,44 @@ class SatisfactoryMapCard extends HTMLElement {
   _showPopup({ layer, o, color }) {
     const rows = this._rows(layer, o).filter(([, v]) => v !== undefined && v !== null && v !== "");
     const title = layer === "resource_nodes" ? `${o.Name} node` : o.Name || LAYERS[layer][0];
-    const entityId = layer === "switches" ? this._info?.switch_entities?.[o.ID] : null;
+    const isBuilding = ["factory", "extractors", "generators"].includes(layer);
+    const entityId =
+      layer === "switches"
+        ? this._info?.switch_entities?.[o.ID]
+        : isBuilding
+          ? this._info?.building_entities?.[o.ID]
+          : null;
+    let actions = "";
+    if (entityId && isBuilding) {
+      actions = `<div class="acts"><button data-act="${o.IsPaused ? "on" : "off"}">${o.IsPaused ? "Run" : "Stand by"}</button>
+        <button data-act="more">Details</button></div>`;
+    } else if (entityId) {
+      actions = `<div class="acts"><button data-act="toggle">Toggle switch</button>
+        <button data-act="more">Details</button></div>`;
+    }
     this._pop.style.setProperty("--pop-color", color);
     this._pop.innerHTML = `
       <button class="x" aria-label="Close">×</button>
       <h3>${esc(title)}</h3>
       <dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
-      ${entityId ? `<div class="acts"><button data-act="toggle">Toggle switch</button>
-        <button data-act="more">Details</button></div>` : ""}`;
+      ${actions}`;
     this._pop.querySelector(".x").onclick = () => this._pop.classList.remove("on");
-    this._pop.querySelector('[data-act="toggle"]')?.addEventListener("click", async () => {
+    const run = async (service, btn) => {
+      btn.disabled = true;
       try {
-        await this._hass.callService("switch", "toggle", { entity_id: entityId });
-        setTimeout(() => this._fetchLayer("switches").then(() => this._draw()), 1200);
+        await this._hass.callService("switch", service, { entity_id: entityId });
+        setTimeout(() => this._fetchLayer(layer).then(() => this._draw()), 1500);
+        this._pop.classList.remove("on");
       } catch (e) {
-        this._status(`Couldn't toggle: ${e.message || e}`);
+        btn.disabled = false;
+        this._status(`Couldn't change it: ${e.message || e}`);
         setTimeout(() => this._status(""), 3000);
       }
-    });
+    };
+    for (const [act, service] of [["toggle", "toggle"], ["on", "turn_on"], ["off", "turn_off"]]) {
+      const btn = this._pop.querySelector(`[data-act="${act}"]`);
+      if (btn) btn.addEventListener("click", () => run(service, btn));
+    }
     this._pop.querySelector('[data-act="more"]')?.addEventListener("click", () => {
       this.dispatchEvent(new CustomEvent("hass-more-info", { bubbles: true, composed: true, detail: { entityId } }));
     });

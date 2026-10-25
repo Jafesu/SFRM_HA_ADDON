@@ -50,7 +50,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.3.0"
+CARD_VERSION = "0.4.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -223,12 +223,18 @@ def ws_map_info(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
     save = data.save if data else None
 
     switch_entities: dict[str, str] = {}
+    building_entities: dict[str, str] = {}
     if save:
-        prefix = f"{entry.entry_id}|save:{save}|switch:"
+        sw_prefix = f"{entry.entry_id}|save:{save}|switch:"
+        b_prefix = f"{entry.entry_id}|save:{save}|building:"
         for ent in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id):
             uid = ent.unique_id or ""
-            if uid.startswith(prefix) and ent.domain == "switch":
-                switch_entities[uid[len(prefix):]] = ent.entity_id
+            if ent.domain != "switch":
+                continue
+            if uid.startswith(sw_prefix):
+                switch_entities[uid[len(sw_prefix):]] = ent.entity_id
+            elif uid.startswith(b_prefix) and uid.endswith(":switch"):
+                building_entities[uid[len(b_prefix):-len(":switch")]] = ent.entity_id
 
     fused = [
         cid for cid, raw in (data.circuits.items() if data else [])
@@ -245,6 +251,7 @@ def ws_map_info(hass: HomeAssistant, connection: websocket_api.ActiveConnection,
             "layers": {k: fast for k, (_, fast) in MAP_LAYERS.items()},
             "fused_circuits": fused,
             "switch_entities": switch_entities,
+            "building_entities": building_entities,
         },
     )
 

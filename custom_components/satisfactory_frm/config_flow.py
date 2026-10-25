@@ -31,6 +31,8 @@ from .api import FRMClient, FRMConnectionError, FRMError, FRMNotReady
 from homeassistant.helpers.selector import BooleanSelector
 
 from .const import (
+    CONF_BUILDING_ENTITIES,
+    DEFAULT_BUILDING_ENTITIES,
     CONF_AUTO_TRACK,
     CONF_EXCLUDED_ITEMS,
     DEFAULT_AUTO_TRACK,
@@ -179,6 +181,10 @@ class FRMOptionsFlow(OptionsFlow):
                 ): BooleanSelector(),
                 vol.Optional(CONF_TRACKED_ITEMS, default=tracked): item_select,
                 vol.Optional(CONF_EXCLUDED_ITEMS, default=excluded): item_select,
+                vol.Optional(
+                    CONF_BUILDING_ENTITIES,
+                    default=opts.get(CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES),
+                ): BooleanSelector(),
                 vol.Optional(CONF_TOKEN, default=token_default): PASSWORD,
                 vol.Optional(
                     CONF_CHAT_SENDER, default=opts.get(CONF_CHAT_SENDER, DEFAULT_CHAT_SENDER)

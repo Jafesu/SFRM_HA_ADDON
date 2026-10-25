@@ -48,6 +48,17 @@ the entry rather than re-adding it.
     efficiency). Overrides Never track.
   - **Never track**: items auto-track should skip.
 - Factory summary: machines producing, idle, paused, average productivity
+- Buildings (option **Create building entities**, on by default), grouped into one
+  device per building type:
+  - a **status** sensor per machine, extractor and generator: Producing, Idle,
+    Standby, No power or Not configured, with recipe, productivity, clock speed,
+    power draw, circuit, shards and somersloops as attributes
+  - a **run/standby switch** per building (needs the token). Buildings in standby
+    draw no power, so these work well for load shedding
+  - an **All &lt;recipe&gt;** switch per recipe that puts every building on it into
+    standby or back to work at once (none for generators, on purpose)
+  - names look like "Constructor Iron Plate 3", numbered in build order; rename
+    freely in HA. Demolished buildings' entities are removed automatically
 
 When a different save loads, the old save's entities go unavailable and come back
 with their history if you load that save again. To remove them for good, run the
@@ -69,7 +80,9 @@ strategy:
 
 You get one tab per server with Overview, Map, Power (a card per circuit, largest
 first, fuse and battery badges), Production (factory summary, the full production
-table, and a card with a 24 h graph for each "always track" item) and Control (switches, priorities, game chat box).
+table, and a card with a 24 h graph for each "always track" item), Buildings
+(production line switches, then a tile per building showing its status, tap the icon
+to toggle) and Control (switches, priorities, game chat box).
 
 Options:
 
@@ -78,7 +91,7 @@ strategy:
   type: custom:satisfactory
   server: My Server        # show one server only
   main_circuit: 1          # headline grid (default: largest capacity)
-  hide: [map, control]     # any of overview, map, power, production, control
+  hide: [map, control]     # any of overview, map, power, production, buildings, control
   history_hours: 24
   map_height: 460
 ```
@@ -127,7 +140,8 @@ browser never talks to FRM directly. The map image and icons come from your FRM
 server. Moving things (players, trains, drones, vehicles) refresh every 5 s;
 buildings, belts and rails every 60 s, and only while the card is on screen.
 
-Tap a marker for details. Power switches can be toggled from the map. Machines on a
+Tap a marker for details. Power switches can be toggled from the map, and machines,
+extractors and generators can be put into standby or set running again. Machines on a
 circuit with a tripped fuse are drawn red. Zoom in to see building footprints.
 
 Options: `layers` (list of layer IDs to show by default), `fast_interval`,

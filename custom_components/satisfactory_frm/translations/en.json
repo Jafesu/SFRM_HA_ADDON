@@ -43,12 +43,14 @@
           "scan_interval": "Power and status refresh",
           "slow_interval": "Production refresh",
           "auto_track": "Auto-track produced items",
-          "excluded_items": "Never track"
+          "excluded_items": "Never track",
+          "building_entities": "Create building entities"
         },
         "data_description": {
           "auto_track": "Creates net and efficiency sensors for every item your factory has machines making. New production lines are picked up automatically.",
           "tracked_items": "These items get all four sensors: produced, consumed, net and efficiency. Overrides Never track.",
-          "excluded_items": "Skipped by auto-track. Useful for noisy intermediates you don't care about."
+          "excluded_items": "Skipped by auto-track. Useful for noisy intermediates you don't care about.",
+          "building_entities": "A status sensor and a run/standby switch for every machine, extractor and generator, plus an \"All <recipe>\" switch per recipe. Switching needs the FRM token."
         }
       }
     }
@@ -129,6 +131,16 @@
       },
       "avg_productivity": {
         "name": "Average productivity"
+      },
+      "building_status": {
+        "name": "Status",
+        "state": {
+          "producing": "Producing",
+          "idle": "Idle",
+          "paused": "Standby",
+          "no_power": "No power",
+          "not_configured": "Not configured"
+        }
       }
     },
     "binary_sensor": {
