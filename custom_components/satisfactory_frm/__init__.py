@@ -25,6 +25,7 @@ from .api import FRMClient, FRMError
 from .const import (
     ASSET_PREFIXES,
     CARD_URL,
+    DASHBOARD_URL,
     CONF_SCAN_INTERVAL,
     CONF_SLOW_INTERVAL,
     CONF_TOKEN,
@@ -45,9 +46,10 @@ PLATFORMS = [
     Platform.NUMBER,
     Platform.SENSOR,
     Platform.SWITCH,
+    Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.1.0"
+CARD_VERSION = "0.2.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -59,6 +61,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     from homeassistant.components.frontend import add_extra_js_url  # noqa: PLC0415
 
     add_extra_js_url(hass, f"{CARD_URL}?v={CARD_VERSION}")
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(DASHBOARD_URL, str(Path(__file__).parent / "frontend" / "satisfactory-dashboard.js"), cache_headers=False)]
+    )
+    add_extra_js_url(hass, f"{DASHBOARD_URL}?v={CARD_VERSION}")
     hass.http.register_view(FRMAssetView())
 
     websocket_api.async_register_command(hass, ws_servers)

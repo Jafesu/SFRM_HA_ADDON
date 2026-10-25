@@ -41,6 +41,16 @@ chat; this file carries over the decisions and findings from that chat.
   `hass.callWS` and `hass.fetchWithAuth`. Polls only while visible; fast layers
   5 s, slow layers 60 s, hidden layers not polled.
 
+- Dashboard strategy `frontend/satisfactory-dashboard.js`
+  (`ll-strategy-dashboard-satisfactory`, YAML `strategy: type: custom:satisfactory`).
+  Finds devices via `hass.entities` (platform satisfactory_frm) and `hass.devices`:
+  server device = no via_device; children by model "Power circuit" / "Production" /
+  "Power switches". A child is in the loaded save if any of its entities is
+  available. Uses translation_key, falling back to English entity-id suffixes.
+  Item sensors expose `item` / `item_key` attributes for grouping. Tested with a
+  mock hass in Node (see git history / test_strategy.mjs idea), not in real HA.
+- `text.py`: "Send chat message" text entity (dashboard chat box).
+
 ## Confirmed FRM facts (from docs and the live web UI source)
 
 - Map image: `/map/map.avif`, one image. deck.gl BitmapLayer bounds

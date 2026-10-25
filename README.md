@@ -30,7 +30,8 @@ the entry rather than re-adding it.
 **Per server (survive save changes)**
 - Server reachable, world ready (with `not_ready_since`), game paused
 - Session name, in-game day and time, days since last death, play time
-- Game chat notify entity: `notify.send_message` posts into in-game chat
+- Game chat: a notify entity for automations (`notify.send_message`) and a
+  "Send chat message" text box for dashboards
 
 **Per save (only available while that save is loaded)**
 - One device per power circuit: production, consumption, capacity, max
@@ -44,6 +45,40 @@ the entry rather than re-adding it.
 When a different save loads, the old save's entities go unavailable and come back
 with their history if you load that save again. To remove them for good, run the
 **Remove inactive save entities** action (`satisfactory_frm.purge_inactive_saves`).
+
+## Ready-made dashboard
+
+The integration ships a dashboard that builds itself from your servers, circuits,
+tracked items and switches, and only shows the save that's currently loaded.
+
+1. **Settings → Dashboards → Add dashboard → New dashboard from scratch**, name it.
+2. Open it, then **⋮ → Edit dashboard → ⋮ → Raw configuration editor**.
+3. Replace everything with:
+
+```yaml
+strategy:
+  type: custom:satisfactory
+```
+
+You get one tab per server with Overview, Map, Power (a card per circuit, largest
+first, fuse and battery badges), Production (factory summary plus a card and 24 h
+graph per tracked item) and Control (switches, priorities, game chat box).
+
+Options:
+
+```yaml
+strategy:
+  type: custom:satisfactory
+  server: My Server        # show one server only
+  main_circuit: 1          # headline grid (default: largest capacity)
+  hide: [map, control]     # any of overview, map, power, production, control
+  history_hours: 24
+  map_height: 460
+```
+
+New circuits and items appear on the next page load. To customise freely, use
+**⋮ → Take control** to convert it into a normal dashboard (it then stops
+updating itself).
 
 ## Map card
 

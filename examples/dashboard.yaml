@@ -1,3 +1,11 @@
+# Easiest option: the self-building dashboard. Put only this in a new dashboard's
+# raw configuration:
+#
+#   strategy:
+#     type: custom:satisfactory
+#
+# The manual starter view below is for people who want to hand-build instead.
+
 # A starter dashboard view. Paste into a dashboard's raw configuration editor
 # (under "views:"), then fix entity IDs to match yours.
 title: Satisfactory

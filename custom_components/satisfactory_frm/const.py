@@ -23,6 +23,7 @@ AUTH_HEADER: Final = "X-FRM-Authorization"
 
 # Map card
 CARD_URL: Final = f"/{DOMAIN}/satisfactory-map-card.js"
+DASHBOARD_URL: Final = f"/{DOMAIN}/satisfactory-dashboard.js"
 # World bounds of /map/map.avif in game units (cm), taken from FRM's web UI.
 MAP_BOUNDS: Final = (-324698.16796875, -375000.0, 425301.83203125, 375000.0)
 # Only these web-UI asset prefixes may be proxied through HA.

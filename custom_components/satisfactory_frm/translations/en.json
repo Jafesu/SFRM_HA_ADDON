@@ -148,6 +148,11 @@
       "game_chat": {
         "name": "Game chat"
       }
+    },
+    "text": {
+      "chat_message": {
+        "name": "Send chat message"
+      }
     }
   },
   "services": {

@@ -338,6 +338,7 @@ class ItemSensor(_SlowSaveSensor):
         self._attr_translation_key = description.key
         self._attr_translation_placeholders = {"item": name}
         self._attr_unique_id = save_uid(entry, save, f"item:{key}:{description.key}")
+        self._attr_extra_state_attributes = {"item": name, "item_key": key}
         self._attr_device_info = save_device(entry, save, "production", "production", "Production")
 
     @property
