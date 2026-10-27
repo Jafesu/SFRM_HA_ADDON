@@ -63,6 +63,12 @@ def _hms_to_seconds(value: Any) -> int | None:
     return int(h * 3600 + m * 60 + s)
 
 
+def _r2(value: Any) -> float | None:
+    """Round to 2 decimals: readable states and fewer recorder writes for jitter."""
+    v = _num(value)
+    return None if v is None else round(v, 2)
+
+
 def _has_batteries(raw: dict[str, Any]) -> bool:
     return (_num(raw.get("BatteryCapacity")) or 0) > 0
 
@@ -132,7 +138,8 @@ def _mw(key: str, field: str, **kw: Any) -> FRMSensorDescription:
         device_class=SensorDeviceClass.POWER,
         native_unit_of_measurement=UnitOfPower.MEGA_WATT,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=kw.pop("value_fn", lambda r: _num(r.get(field))),
+        suggested_display_precision=1,
+        value_fn=kw.pop("value_fn", lambda r: _r2(r.get(field))),
         **kw,
     )
 
@@ -146,6 +153,7 @@ CIRCUIT_SENSORS: tuple[FRMSensorDescription, ...] = (
     FRMSensorDescription(
         key="power_load",
         native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=0,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=_load,
     ),
@@ -158,6 +166,7 @@ CIRCUIT_SENSORS: tuple[FRMSensorDescription, ...] = (
         key="battery_percent",
         device_class=SensorDeviceClass.BATTERY,
         native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=0,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda r: _num(r.get("BatteryPercent")) if _has_batteries(r) else None,
     ),
@@ -202,21 +211,23 @@ def _net(raw: dict[str, Any]) -> float | None:
 ITEM_SENSORS: tuple[FRMSensorDescription, ...] = (
     FRMSensorDescription(
         key="item_produced", native_unit_of_measurement=PER_MIN,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda r: _num(r.get("CurrentProd")),
+        state_class=SensorStateClass.MEASUREMENT, suggested_display_precision=1,
+        value_fn=lambda r: _r2(r.get("CurrentProd")),
     ),
     FRMSensorDescription(
         key="item_consumed", native_unit_of_measurement=PER_MIN,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda r: _num(r.get("CurrentConsumed")),
+        state_class=SensorStateClass.MEASUREMENT, suggested_display_precision=1,
+        value_fn=lambda r: _r2(r.get("CurrentConsumed")),
     ),
     FRMSensorDescription(
         key="item_net", native_unit_of_measurement=PER_MIN,
-        state_class=SensorStateClass.MEASUREMENT, value_fn=_net,
+        state_class=SensorStateClass.MEASUREMENT, suggested_display_precision=1,
+        value_fn=_net,
     ),
     FRMSensorDescription(
         key="item_efficiency", native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT, value_fn=_efficiency,
+        state_class=SensorStateClass.MEASUREMENT, suggested_display_precision=0,
+        value_fn=_efficiency,
     ),
 )
 
@@ -229,6 +240,7 @@ FACTORY_SENSORS: tuple[FRMSensorDescription, ...] = tuple(
 ) + (
     FRMSensorDescription(
         key="avg_productivity", native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=0,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda f: f.get("avg_productivity"),
     ),

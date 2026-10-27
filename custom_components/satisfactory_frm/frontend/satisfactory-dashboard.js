@@ -148,7 +148,16 @@ function collect(hass) {
       .sort((a, b) => a.label.localeCompare(b.label));
     const linesDev = active.find((d) => d.model === "Production lines");
     const lines = linesDev
-      ? byDevice.get(linesDev.id).map((e) => e.entity_id).filter((id) => id.startsWith("switch.")).sort()
+      ? byDevice
+          .get(linesDev.id)
+          .filter((e) => e.entity_id.startsWith("switch."))
+          .map((e) => {
+            const attrs = hass.states[e.entity_id]?.attributes || {};
+            const fn = attrs.friendly_name || e.entity_id;
+            const label = attrs.recipe || fn.replace(/^.*?\bAll\s+/, "");
+            return { entity: e.entity_id, name: label };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name))
       : [];
 
     const switchDev = active.find((d) => d.model === "Power switches");
@@ -302,7 +311,7 @@ function productionSection(hass, srv, cfg) {
     if (!e.item_produced) continue;
     cards.push({
       type: "vertical-stack",
-      grid_options: { columns: 6 },
+      grid_options: { columns: 12 },
       cards: [
         {
           type: "entities",
@@ -359,10 +368,14 @@ function buildingsSection(hass, srv) {
       type: "entities",
       title: "Production lines",
       state_color: true,
+      show_header_toggle: false,
       entities: srv.lines,
-      footer: undefined,
+      grid_options: { columns: 12 },
     });
-    cards.push(md("Turning a line off puts every building on that recipe into standby (no power draw)."));
+    cards.push({
+      ...md("Each switch controls every building on that recipe. **Off** puts them all into standby, so they stop drawing power."),
+      grid_options: { columns: 12 },
+    });
   }
   for (const g of srv.buildingGroups) {
     cards.push(heading(`${g.label} (${g.switches.length})`, { heading_style: "subtitle" }));
@@ -372,7 +385,7 @@ function buildingsSection(hass, srv) {
         entity: sw.id,
         name: sw.name,
         state_content: ["status_label", "state"],
-        grid_options: { columns: 6 },
+        grid_options: { columns: 8 },
       });
     }
   }
