@@ -126,6 +126,14 @@ class FRMClient:
         self._require_token()
         return await self._request("POST", "setEnabled", {"ID": building_id, "status": enabled})
 
+    async def create_ping(self, x: float, y: float, z: float) -> Any:
+        """Ping a world location in game.
+
+        VERIFY: payload format assumed ({"x", "y", "z"} in game units); see CLAUDE.md.
+        """
+        self._require_token()
+        return await self._request("POST", "createPing", {"x": x, "y": y, "z": z})
+
     async def send_chat(self, message: str, sender: str) -> Any:
         self._require_token()
         return await self._request("POST", "sendChatMessage", {"message": message, "sender": sender})

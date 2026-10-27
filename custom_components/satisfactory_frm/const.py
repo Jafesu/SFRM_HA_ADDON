@@ -61,4 +61,9 @@ MAP_LAYERS: Final[dict[str, tuple[str, bool]]] = {
     "radar": ("getRadarTower", False),
     "resource_nodes": ("getResourceNode", False),
     "map_markers": ("getMapMarkers", False),
+    # Collectibles
+    "artifacts": ("getArtifacts", False),
+    "slugs": ("getPowerSlug", False),
+    "drop_pods": ("getDropPod", False),
+    "unlock_items": ("getUnlockItems", False),
 }

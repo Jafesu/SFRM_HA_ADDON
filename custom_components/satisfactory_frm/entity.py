@@ -22,6 +22,7 @@ from .const import DOMAIN
 
 if TYPE_CHECKING:
     from .api import FRMClient
+    from .markers import MarkerStore
     from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
 
 
@@ -31,6 +32,7 @@ class FRMRuntime:
     fast: FRMFastCoordinator
     slow: FRMSlowCoordinator
     asset_cache: dict[str, tuple[bytes, str]]
+    markers: MarkerStore
 
 
 type FRMConfigEntry = ConfigEntry[FRMRuntime]

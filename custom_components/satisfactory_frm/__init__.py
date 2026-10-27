@@ -38,6 +38,7 @@ from .const import (
 )
 from .coordinator import FRMFastCoordinator, FRMSlowCoordinator, is_produced
 from .entity import FRMConfigEntry, FRMRuntime, server_device
+from .markers import ICONS, MarkerStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.4.1"
+CARD_VERSION = "0.5.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -76,6 +77,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     websocket_api.async_register_command(hass, ws_map_info)
     websocket_api.async_register_command(hass, ws_map_layer)
     websocket_api.async_register_command(hass, ws_production)
+    websocket_api.async_register_command(hass, ws_ping)
+    websocket_api.async_register_command(hass, ws_markers_list)
+    websocket_api.async_register_command(hass, ws_markers_add)
+    websocket_api.async_register_command(hass, ws_markers_update)
+    websocket_api.async_register_command(hass, ws_markers_delete)
 
     async def _purge(call: ServiceCall) -> None:
         await async_purge_inactive_saves(hass, call.data.get("entry_id"))
@@ -106,7 +112,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: FRMConfigEntry) -> bool:
     await fast.async_config_entry_first_refresh()
     await slow.async_config_entry_first_refresh()
 
-    entry.runtime_data = FRMRuntime(client=client, fast=fast, slow=slow, asset_cache={})
+    markers = MarkerStore(hass, entry.entry_id)
+    await markers.async_load()
+    entry.runtime_data = FRMRuntime(
+        client=client, fast=fast, slow=slow, asset_cache={}, markers=markers
+    )
     # Make sure the server device exists before save-level devices link to it.
     dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, **server_device(entry, client.base_url)
@@ -338,3 +348,120 @@ def ws_production(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
             "items": items,
         },
     )
+
+
+# --- Pings and HA-side markers -----------------------------------------------
+
+def _entry_and_save(hass: HomeAssistant, connection, msg) -> tuple[FRMConfigEntry, str] | None:
+    entry = _loaded_entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "Server not loaded")
+        return None
+    data = entry.runtime_data.fast.data
+    if not data or not data.save:
+        connection.send_error(msg["id"], "not_ready", "World not ready")
+        return None
+    return entry, data.save
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "satisfactory_frm/ping",
+        vol.Required("entry_id"): str,
+        vol.Required("x"): vol.Coerce(float),
+        vol.Required("y"): vol.Coerce(float),
+        vol.Optional("z", default=0.0): vol.Coerce(float),
+    }
+)
+@websocket_api.async_response
+async def ws_ping(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    found = _entry_and_save(hass, connection, msg)
+    if not found:
+        return
+    entry, _ = found
+    try:
+        await entry.runtime_data.client.create_ping(msg["x"], msg["y"], msg["z"])
+    except FRMError as err:
+        connection.send_error(msg["id"], "frm_error", str(err))
+        return
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "satisfactory_frm/markers/list", vol.Required("entry_id"): str}
+)
+@callback
+def ws_markers_list(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    found = _entry_and_save(hass, connection, msg)
+    if found:
+        entry, save = found
+        connection.send_result(msg["id"], entry.runtime_data.markers.list(save))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "satisfactory_frm/markers/add",
+        vol.Required("entry_id"): str,
+        vol.Required("x"): vol.Coerce(float),
+        vol.Required("y"): vol.Coerce(float),
+        vol.Optional("name", default="Marker"): str,
+        vol.Optional("color", default="#f99b38"): str,
+        vol.Optional("icon", default="pin"): vol.In(ICONS),
+    }
+)
+@websocket_api.async_response
+async def ws_markers_add(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    found = _entry_and_save(hass, connection, msg)
+    if not found:
+        return
+    entry, save = found
+    user = connection.user.name if connection.user else None
+    marker = await entry.runtime_data.markers.add(
+        save, msg["x"], msg["y"], msg["name"], msg["color"], msg["icon"], user
+    )
+    connection.send_result(msg["id"], marker)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "satisfactory_frm/markers/update",
+        vol.Required("entry_id"): str,
+        vol.Required("marker_id"): str,
+        vol.Optional("name"): str,
+        vol.Optional("color"): str,
+        vol.Optional("icon"): vol.In(ICONS),
+        vol.Optional("x"): vol.Coerce(float),
+        vol.Optional("y"): vol.Coerce(float),
+    }
+)
+@websocket_api.async_response
+async def ws_markers_update(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    found = _entry_and_save(hass, connection, msg)
+    if not found:
+        return
+    entry, save = found
+    changes = {k: msg[k] for k in ("name", "color", "icon", "x", "y") if k in msg}
+    marker = await entry.runtime_data.markers.update(save, msg["marker_id"], changes)
+    if marker is None:
+        connection.send_error(msg["id"], "not_found", "Marker not found")
+    else:
+        connection.send_result(msg["id"], marker)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "satisfactory_frm/markers/delete",
+        vol.Required("entry_id"): str,
+        vol.Required("marker_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_markers_delete(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    found = _entry_and_save(hass, connection, msg)
+    if not found:
+        return
+    entry, save = found
+    if await entry.runtime_data.markers.delete(save, msg["marker_id"]):
+        connection.send_result(msg["id"], {"ok": True})
+    else:
+        connection.send_error(msg["id"], "not_found", "Marker not found")

@@ -141,17 +141,30 @@ server. Moving things (players, trains, drones, vehicles) refresh every 5 s;
 buildings, belts and rails every 60 s, and only while the card is on screen.
 
 Tap a marker for details. Power switches can be toggled from the map, and machines,
-extractors and generators can be put into standby or set running again. Machines on a
-circuit with a tripped fuse are drawn red. Zoom in to see building footprints.
+extractors and generators can be put into standby or set running again.
 
-Options: `layers` (list of layer IDs to show by default), `fast_interval`,
-`slow_interval`, `min_z` / `max_z` (height filter in cm), `title`.
+**Layers and filters are remembered** per Home Assistant user (across devices),
+falling back to the browser if needed. Tap **Filters** for detailed filtering:
+resource nodes by resource, purity and free/in use (e.g. only Limestone + only Pure),
+power slugs by colour, Somersloops vs Mercer Spheres, drop pods by status, tapes by
+type, and game markers by category.
 
-## Issues
+**Collectibles:** power slugs, Somersloops and Mercer Spheres, drop pods (colour
+shows unopened, needs power, opened, looted) and tapes/unlocks.
 
-Report problems at https://github.com/Jafesu/SFRM_HA_ADDON/issues (not on the FRM mod's
-repository). Please include your HA version, FRM version, and any log lines from
-`custom_components.satisfactory_frm`.
+**Full screen:** the ⛶ button. Uses real full screen where the browser allows it,
+otherwise expands the card over the page (Esc or ⛶ again to close).
+
+**Pings and markers:** long-press (or right-click) anywhere on the map:
+- **Ping in game** drops a ping at that spot for players (needs the FRM token). Any
+  object's popup also has a Ping button.
+- **Add marker** saves a named, coloured pin. FRM can't create in-game map markers, so
+  these live in Home Assistant: every HA user sees them on the map card, per save.
+  Tap a marker to edit, ping or delete it.
+
+Options: `layers` (default layers before anything is remembered), `remember: false`
+(don't remember layers/filters), `fast_interval`, `slow_interval`,
+`min_z` / `max_z` (height filter in cm), `title`.
 
 ## Security
 
