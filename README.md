@@ -71,10 +71,9 @@ When a different save loads, the old save's entities go unavailable and come bac
 with their history if you load that save again. To remove them for good, run the
 **Remove inactive save entities** action (`satisfactory_frm.purge_inactive_saves`).
 
-## Ready-made dashboard
+## Ready-made dashboard: the Control Room
 
-The integration ships a dashboard that builds itself from your servers, circuits,
-tracked items and switches, and only shows the save that's currently loaded.
+The integration ships a control-room dashboard that builds itself from your servers.
 
 1. **Settings → Dashboards → Add dashboard → New dashboard from scratch**, name it.
 2. Open it, then **⋮ → Edit dashboard → ⋮ → Raw configuration editor**.
@@ -85,27 +84,42 @@ strategy:
   type: custom:satisfactory
 ```
 
-You get one tab per server with Overview, Map, Power (a card per circuit, largest
-first, fuse and battery badges), Production (factory summary, the full production
-table, and a card with a 24 h graph for each "always track" item), Buildings
-(production line switches, then a tile per building showing its status, tap the icon
-to toggle) and Control (switches, priorities, game chat box).
+You get five views per server, with tabs in the control-room header:
+
+- **Control Room**: status lamps and in-game clock, an alarm panel (fuses, dead grids,
+  overload, draining batteries, shortfalls, idle machines; alarms flash until
+  acknowledged, and acknowledgements are remembered per user), factory status, a dial
+  per power circuit and a watchlist of the biggest shortfalls and surpluses.
+- **Power**: per circuit a load dial, circuit-breaker indicator, battery tank, stats
+  and a 2-hour load trend, plus the generator bank with run/standby switches.
+- **Production**: a lever per production line (confirms before stopping a line) and a
+  throughput board with filters and trends; tap a row for its history.
+- **Machines**: every machine as a rack module with status LED, clock speed,
+  productivity and its own run/standby switch, grouped by type with status filters.
+- **Map**: the live map.
 
 Options:
 
 ```yaml
 strategy:
   type: custom:satisfactory
-  server: My Server        # show one server only
-  main_circuit: 1          # headline grid (default: largest capacity)
-  hide: [map, control]     # any of overview, map, power, production, buildings, control
-  history_hours: 24
-  map_height: 460
+  circuit_names: {2: Main grid, 0: Biomass grid}   # name your circuits
+  hide: [map]              # any of power, production, machines, map
+  map_height: 720
+  layout: classic          # the earlier auto-built layout with standard HA cards
 ```
 
-New circuits and items appear on the next page load. To customise freely, use
-**⋮ → Take control** to convert it into a normal dashboard (it then stops
-updating itself).
+The control-room cards keep their own dark industrial look regardless of your HA theme.
+They load the Chakra Petch and JetBrains Mono fonts from Google Fonts, falling back to
+system fonts offline.
+
+**Using the cards on your own dashboards.** Every part is also a card you can place
+anywhere (all accept `server:` and `circuit_names:`): `custom:sfrm-page-card`
+(`page: control | power | production | machines | map`), `custom:sfrm-header-card`,
+`custom:sfrm-alarms-card`, `custom:sfrm-status-card`, `custom:sfrm-grid-card`,
+`custom:sfrm-power-card`, `custom:sfrm-generators-card`, `custom:sfrm-watchlist-card`,
+`custom:sfrm-levers-card`, `custom:sfrm-throughput-card`, `custom:sfrm-rack-card`.
+For a full-page look, put `sfrm-page-card` in a **Panel** view.
 
 ### Sidebar icon
 

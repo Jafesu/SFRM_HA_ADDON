@@ -27,6 +27,7 @@ from .const import (
     CARD_URL,
     DASHBOARD_URL,
     PRODUCTION_CARD_URL,
+    CONTROL_ROOM_URL,
     CONF_SCAN_INTERVAL,
     CONF_SLOW_INTERVAL,
     CONF_TOKEN,
@@ -51,7 +52,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.5.1"
+CARD_VERSION = "0.6.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -71,6 +72,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         [StaticPathConfig(PRODUCTION_CARD_URL, str(Path(__file__).parent / "frontend" / "satisfactory-production-card.js"), cache_headers=False)]
     )
     add_extra_js_url(hass, f"{PRODUCTION_CARD_URL}?v={CARD_VERSION}")
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(CONTROL_ROOM_URL, str(Path(__file__).parent / "frontend" / "sfrm-control-room.js"), cache_headers=False)]
+    )
+    add_extra_js_url(hass, f"{CONTROL_ROOM_URL}?v={CARD_VERSION}")
     hass.http.register_view(FRMAssetView())
 
     websocket_api.async_register_command(hass, ws_servers)

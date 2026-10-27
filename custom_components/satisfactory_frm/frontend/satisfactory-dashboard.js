@@ -5,8 +5,10 @@
  *   strategy:
  *     type: custom:satisfactory
  *     # server: My Server        # one server only (display name or entry ID)
- *     # main_circuit: 1          # headline grid; default = largest capacity
- *     # hide: [map, control]     # overview | map | power | production | buildings | control
+ *     # hide: [map]              # power | production | machines | map
+ *     # circuit_names: {2: Main grid, 0: Biomass}
+ *     # layout: classic          # the older auto-built HA-card layout instead
+ *     #   (classic options: main_circuit, hide: overview | map | power | production | buildings | control)
  *     # history_hours: 24
  *     # map_height: 460
  *
@@ -435,6 +437,36 @@ function buildView(hass, srv, cfg) {
   };
 }
 
+const CR_PAGES = [
+  ["control", "Control Room", "mdi:monitor-dashboard"],
+  ["power", "Power", "mdi:flash"],
+  ["production", "Production", "mdi:factory"],
+  ["machines", "Machines", "mdi:cogs"],
+  ["map", "Map", "mdi:map"],
+];
+
+// Control-room layout: one panel view per page, each a full-width sfrm-page-card.
+function controlRoomViews(srv, cfg, multi) {
+  const hide = new Set(cfg.hide || []);
+  const base = slug(srv.name) || "satisfactory";
+  const pages = CR_PAGES.filter(([page]) => page === "control" || !hide.has(page));
+  const nav = pages.map(([page, label]) => ({ page, label, path: page === "control" ? base : `${base}-${page}` }));
+  return pages.map(([page, label, icon]) => ({
+    title: multi ? `${srv.name} · ${label}` : label,
+    path: nav.find((n) => n.page === page).path,
+    icon,
+    type: "panel",
+    cards: [{
+      type: "custom:sfrm-page-card",
+      page,
+      server: srv.entryId,
+      nav,
+      ...(cfg.circuit_names ? { circuit_names: cfg.circuit_names } : {}),
+      ...(cfg.map_height ? { map_height: cfg.map_height } : {}),
+    }],
+  }));
+}
+
 class SatisfactoryDashboardStrategy extends HTMLElement {
   static async generate(config, hass) {
     let servers = collect(hass);
@@ -464,7 +496,11 @@ class SatisfactoryDashboardStrategy extends HTMLElement {
         ],
       };
     }
-    return { title: "Satisfactory", views: servers.map((s) => buildView(hass, s, config)) };
+    if (config.layout === "classic") {
+      return { title: "Satisfactory", views: servers.map((s) => buildView(hass, s, config)) };
+    }
+    const multi = servers.length > 1;
+    return { title: "Satisfactory", views: servers.flatMap((s) => controlRoomViews(s, config, multi)) };
   }
 }
 
