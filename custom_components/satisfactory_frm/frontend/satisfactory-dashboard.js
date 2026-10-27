@@ -17,6 +17,27 @@
 
 const DOMAIN = "satisfactory_frm";
 
+// ---------------------------------------------------------------------------
+// Custom icon set: use "sfrm:factory" or "sfrm:logo" anywhere HA takes an icon,
+// e.g. a dashboard's sidebar icon.
+const SFRM_ICONS = {
+  factory: "M3 16.5 3 6.5 6.5 9 6.5 6.5 10 9 10 6.5 13.5 9 13.5 3.5 15.5 3.5 15.5 9 19 9 19 16.5ZM4.6 14 6.6 14 6.6 11.5 4.6 11.5ZM8.2 14 10.2 14 10.2 11.5 8.2 11.5ZM11.8 14 13.8 14 13.8 11.5 11.8 11.5ZM15.4 14 17.4 14 17.4 11.5 15.4 11.5ZM2 18.8 7.67 18.8 9.85 16.62 11.35 19.9 12.76 17.25 14.59 18.8 22 18.8 22 20.4 14.01 20.4 13.24 19.75 11.25 23.5 9.35 19.38 8.33 20.4 2 20.4Z",
+  logo: "M12 0.4 22.05 6.2 22.05 17.8 12 23.6 1.95 17.8 1.95 6.2ZM17.92 17.21 17.92 11.66 15.33 11.66 15.33 7.59 13.85 7.59 13.85 11.66 11.26 9.81 11.26 11.66 8.67 9.81 8.67 11.66 6.08 9.81 6.08 17.21ZM7.26 13.51 8.74 13.51 8.74 15.36 7.26 15.36ZM9.93 13.51 11.41 13.51 11.41 15.36 9.93 15.36ZM12.59 13.51 14.07 13.51 14.07 15.36 12.59 15.36ZM15.26 13.51 16.74 13.51 16.74 15.36 15.26 15.36Z",
+};
+window.customIcons = window.customIcons || {};
+if (!window.customIcons.sfrm) {
+  window.customIcons.sfrm = {
+    getIcon: async (name) => ({ path: SFRM_ICONS[name] || SFRM_ICONS.factory }),
+    getIconList: async () => Object.keys(SFRM_ICONS).map((name) => ({ name })),
+  };
+}
+window.customIconsets = window.customIconsets || {};
+if (!window.customIconsets.sfrm) {
+  window.customIconsets.sfrm = async (name) => ({ path: SFRM_ICONS[name] || SFRM_ICONS.factory });
+}
+window.dispatchEvent(new Event("custom-icon-registered"));
+
+
 // translation_key -> English entity-name slug (fallback when the registry
 // doesn't expose translation_key).
 const SUFFIX = {

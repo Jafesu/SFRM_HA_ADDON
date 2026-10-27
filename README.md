@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="custom_components/satisfactory_frm/brand/dark_logo@2x.png">
+    <img src="custom_components/satisfactory_frm/brand/logo@2x.png" alt="SFRM: Satisfactory factory monitoring" width="420">
+  </picture>
+</p>
+
 # Satisfactory for Home Assistant (Ficsit Remote Monitoring)
 
 Monitor and control Satisfactory servers from Home Assistant using the
@@ -99,6 +106,12 @@ strategy:
 New circuits and items appear on the next page load. To customise freely, use
 **⋮ → Take control** to convert it into a normal dashboard (it then stops
 updating itself).
+
+### Sidebar icon
+
+The integration adds its own icons. In **Settings → Dashboards**, open your
+Satisfactory dashboard's settings and set its icon to `sfrm:factory` (factory with a
+pulse line) or `sfrm:logo` (the hex badge). They work anywhere HA asks for an icon.
 
 ### If the dashboard says "Timeout waiting for strategy element"
 
