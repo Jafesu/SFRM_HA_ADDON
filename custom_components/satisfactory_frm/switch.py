@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 import asyncio
+import logging
 
 from .api import FRMError
 from .buildings import (
@@ -26,6 +27,9 @@ from .buildings import (
 from .const import CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES
 from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
 from .entity import FRMConfigEntry, FRMSaveEntityMixin, save_device, save_uid
+
+_LOGGER = logging.getLogger(__name__)
+VERIFY_DELAY = 2.0  # seconds for the game to apply standby before re-checking
 
 
 def switch_name(raw: dict[str, Any], sid: str) -> str:
@@ -163,24 +167,39 @@ class _SlowSaveSwitch(FRMSaveEntityMixin, CoordinatorEntity[FRMSlowCoordinator],
         client = self.coordinator.client
         sem = asyncio.Semaphore(4)
 
-        async def one(bid: str) -> None:
+        async def one(bid: str) -> Any:
             async with sem:
-                await client.set_enabled(bid, on)
+                return await client.set_enabled(bid, on)
 
         results = await asyncio.gather(*(one(b) for b in ids), return_exceptions=True)
-        failed = [r for r in results if isinstance(r, BaseException)]
-        machines = self.coordinator.data.machines
         for bid, result in zip(ids, results):
-            if not isinstance(result, BaseException) and bid in machines:
-                machines[bid]["IsPaused"] = not on  # optimistic until next poll
-        self.coordinator.async_update_listeners()
-        await self.coordinator.async_request_refresh()
+            _LOGGER.debug("setEnabled %s -> %s: FRM replied %r", bid, on, result)
+        failed = [r for r in results if isinstance(r, BaseException)]
+        sent = [bid for bid, r in zip(ids, results) if not isinstance(r, BaseException)]
+
+        if sent:
+            # Re-read the buildings from FRM to see whether the game really changed them.
+            await asyncio.sleep(VERIFY_DELAY)
+            await self.coordinator.async_refresh()
+
+        machines = self.coordinator.data.machines if self.coordinator.data else {}
+        unchanged = [b for b in sent if b in machines and is_running(machines[b]) != on]
+        if unchanged:
+            kinds = sorted({type_name(machines[b]) for b in unchanged})
+            _LOGGER.warning(
+                "FRM accepted %s for %d building(s) but they did not change (%s). "
+                "FRM or the game may not support standby for this building type",
+                "run" if on else "standby", len(unchanged), ", ".join(kinds),
+            )
+            raise HomeAssistantError(
+                f"FRM accepted the command, but {len(unchanged)} of {len(ids)} building(s) "
+                f"({', '.join(kinds)}) are still {'in standby' if on else 'running'}. "
+                "Standby may not be supported for this building type."
+            )
         if failed:
             first = failed[0]
             msg = str(first) if isinstance(first, FRMError) else repr(first)
-            raise HomeAssistantError(
-                f"{len(failed)} of {len(ids)} building(s) didn't change: {msg}"
-            )
+            raise HomeAssistantError(f"{len(failed)} of {len(ids)} building(s) didn't change: {msg}")
 
 
 class BuildingSwitch(_SlowSaveSwitch):

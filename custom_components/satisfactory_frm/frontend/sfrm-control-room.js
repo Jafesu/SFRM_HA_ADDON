@@ -78,7 +78,7 @@ button:focus-visible,a:focus-visible{outline:2px solid ${COL.orange};outline-off
 .modal .stripe{height:8px;margin:-20px -20px 16px;border-radius:12px 12px 0 0;background:repeating-linear-gradient(-45deg,${COL.orange} 0 12px,#14100a 12px 24px)}
 .modal h3{margin:0 0 8px;font-size:20px;letter-spacing:.04em}
 .modal p{margin:0 0 18px;font-size:14px;color:${COL.text2};line-height:1.5}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1d2430;border:1px solid ${COL.line};color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;z-index:21}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1d2430;border:1px solid ${COL.amber};color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;line-height:1.4;z-index:21;max-width:min(560px,calc(100vw - 32px))}
 @media (prefers-reduced-motion: reduce){.blink,.blinkw,.led-on{animation:none}.needle,.grow,.rocker .k{transition:none}}
 `;
 
@@ -222,6 +222,9 @@ function feed(key, fetcher, maxAgeMs, listener) {
       });
   }
   return f.data;
+}
+function invalidate(prefix) {
+  FEEDS.forEach((f, key) => { if (key.startsWith(prefix)) f.ts = 0; });
 }
 function unlisten(listener) {
   FEEDS.forEach((f) => f.listeners.delete(listener));
@@ -421,20 +424,24 @@ class SfrmBase extends HTMLElement {
     this._toastMsg = msg;
     this._dirty();
     clearTimeout(this._toastT);
-    this._toastT = setTimeout(() => { this._toastMsg = null; this._dirty(); }, 3000);
+    this._toastT = setTimeout(() => { this._toastMsg = null; this._dirty(); }, Math.max(3000, msg.length * 60));
   }
-  async service(domain, service, entity_id) {
+  async service(domain, service, entity_id, after) {
     try {
       await this._hass.callService(domain, service, { entity_id });
     } catch (err) {
-      this.toast(`Couldn't do that: ${err.message || err}`);
+      if (this._pend) delete this._pend[entity_id]; // show the real state, not the hoped-for one
+      this.toast(err.message || String(err));
+    } finally {
+      after?.();
+      this._dirty();
     }
   }
   // Optimistic switch states while a command is in flight.
   pending(entity, value) {
     this._pend = this._pend || {};
     if (value !== undefined) {
-      this._pend[entity] = { value, until: Date.now() + 6000 };
+      this._pend[entity] = { value, until: Date.now() + 8000 };
       this._dirty();
     }
     const p = this._pend[entity];
@@ -734,6 +741,7 @@ function sparkPointsFixed(samples, w, h, current) {
 class SfrmGeneratorsCard extends SfrmBase {
   view(srv) {
     const h = this._hass;
+    this._srvEntry = srv.entryId;
     const gens = layerFeed(h, srv, "generators", this);
     const info = infoFeed(h, srv, this);
     if (gens === undefined) return `<section class="panel"><h2 class="t">GENERATOR BANK</h2><div class="empty">Loading generators…</div></section>`;
@@ -745,7 +753,8 @@ class SfrmGeneratorsCard extends SfrmBase {
         names[short] = (names[short] || 0) + 1;
         const entity = info?.building_entities?.[g.ID] || srv.buildingSwitch[g.ID];
         const pend = entity ? this.pending(entity) : undefined;
-        const on = pend !== undefined ? pend : !g.IsPaused;
+        const entState = entity ? this._hass.states[entity]?.state : undefined;
+        const on = pend !== undefined ? pend : entState === "on" || entState === "off" ? entState === "on" : !g.IsPaused;
         const base = Number(g.BaseProd) || 0;
         const outMw = Number(g.PowerProduction ?? g.CurrentPowerProduction ?? (on && g.IsFullSpeed ? base : 0)) || 0;
         const outPct = base ? Math.min(100, (outMw / base) * 100) : on && g.IsFullSpeed ? 100 : 0;
@@ -768,8 +777,13 @@ class SfrmGeneratorsCard extends SfrmBase {
           ${fuel !== undefined && fuel !== null ? `<div class="lbl">FUEL <span class="mono" style="color:${COL.text2}">${esc(typeof fuel === "number" ? fuel.toFixed(1) : fuel)}</span></div>` : ""}
         </div>`;
       });
-    const running = gens.filter((g) => !g.IsPaused).length;
-    const low = gens.filter((g) => !g.IsPaused && !g.IsFullSpeed).length;
+    const genOn = (g) => {
+      const ent = info?.building_entities?.[g.ID] || srv.buildingSwitch[g.ID];
+      const st = ent ? this._hass.states[ent]?.state : undefined;
+      return st === "on" || st === "off" ? st === "on" : !g.IsPaused;
+    };
+    const running = gens.filter(genOn).length;
+    const low = gens.filter((g) => genOn(g) && !g.IsFullSpeed).length;
     return `<section class="panel" aria-label="Generator bank">
       <div class="row" style="margin-bottom:12px"><h2 class="t">GENERATOR BANK</h2>
         <div class="sub">${gens.length ? `${running} of ${gens.length} running${low ? ` · ${low} below full output` : ""}` : ""}</div></div>
@@ -779,15 +793,16 @@ class SfrmGeneratorsCard extends SfrmBase {
   act(act, arg, el) {
     if (act !== "gen") return;
     const on = el.dataset.on === "1";
+    const refresh = () => invalidate(`layer:${this._srvEntry}:generators`);
     if (!on) {
       this.pending(arg, true);
-      this.service("switch", "turn_on", arg);
+      this.service("switch", "turn_on", arg, refresh);
       return;
     }
     const mw = Number(el.dataset.mw) || 0;
     this.confirm(`Put ${el.dataset.name} on standby?`,
       `It stops producing and burns no fuel.${mw ? ` Its grid loses up to ${mw} MW of capacity.` : ""} You can run it again from here at any time.`,
-      "STANDBY", () => { this.pending(arg, false); this.service("switch", "turn_off", arg); });
+      "STANDBY", () => { this.pending(arg, false); this.service("switch", "turn_off", arg, refresh); });
   }
 }
 
