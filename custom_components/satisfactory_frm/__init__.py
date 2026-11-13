@@ -38,11 +38,14 @@ from .const import (
     GAME_DATA_ENDPOINTS,
     MAP_BOUNDS,
     MAP_LAYERS,
+    PLANNER_PANEL,
+    PLANNER_URL,
 )
 from .coordinator import FRMFastCoordinator, FRMSlowCoordinator, is_produced
 from .entity import FRMConfigEntry, FRMRuntime, server_device
 from .markers import ICONS, MarkerStore
 from .pipes import network_names, network_summary
+from .planner_ws import COMMANDS as PLANNER_COMMANDS, PlannerData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,7 +58,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.7.1"
+CARD_VERSION = "0.8.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -80,6 +83,24 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     )
     add_extra_js_url(hass, f"{CONTROL_ROOM_URL}?v={CARD_VERSION}")
     hass.http.register_view(FRMAssetView())
+
+    # Factory planner: a sidebar page (one for all servers; it has a server picker).
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(PLANNER_URL, str(Path(__file__).parent / "frontend" / "sfrm-planner.js"), cache_headers=False)]
+    )
+    from homeassistant.components import panel_custom  # noqa: PLC0415
+
+    await panel_custom.async_register_panel(
+        hass,
+        frontend_url_path=PLANNER_PANEL,
+        webcomponent_name="sfrm-planner-panel",
+        sidebar_title="Factory planner",
+        sidebar_icon="mdi:factory",
+        module_url=f"{PLANNER_URL}?v={CARD_VERSION}",
+        require_admin=False,
+    )
+    for command in PLANNER_COMMANDS:
+        websocket_api.async_register_command(hass, command)
 
     websocket_api.async_register_command(hass, ws_servers)
     websocket_api.async_register_command(hass, ws_map_info)
@@ -125,6 +146,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FRMConfigEntry) -> bool:
 
     markers = MarkerStore(hass, entry.entry_id)
     await markers.async_load()
+    planner = PlannerData(hass, entry.entry_id)
+    await planner.async_load()
     entry.runtime_data = FRMRuntime(
         client=client,
         fast=fast,
@@ -132,6 +155,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FRMConfigEntry) -> bool:
         asset_cache={},
         markers=markers,
         cleaner=StaleCleaner(hass, entry),
+        planner=planner,
     )
     # Make sure the server device exists before save-level devices link to it.
     dr.async_get(hass).async_get_or_create(

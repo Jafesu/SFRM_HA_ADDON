@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from .api import FRMClient
     from .cleanup import StaleCleaner
     from .markers import MarkerStore
+    from .planner_ws import PlannerData
     from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
 
 
@@ -35,6 +36,7 @@ class FRMRuntime:
     asset_cache: dict[str, tuple[bytes, str]]
     markers: MarkerStore
     cleaner: StaleCleaner
+    planner: PlannerData
     # Save-level objects the platforms have created entities for:
     # (platform, save slug, object key). The cleaner forgets an object when it
     # removes its entities, so it is re-created if it comes back.

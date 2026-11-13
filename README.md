@@ -160,6 +160,30 @@ Resources → Add resource**, URL `/satisfactory_frm/satisfactory-dashboard.js`,
 type JavaScript module. (Do the same with `/satisfactory_frm/satisfactory-map-card.js`
 if the map card ever shows as a custom element error.)
 
+## Factory planner
+
+A **Factory planner** page appears in the Home Assistant sidebar. Pick what you
+want to make and how fast, and it works out the cheapest way to do it from your
+live save:
+
+- only recipes you've **unlocked** (milestones, M.A.M., AWESOME Shop, hard drives,
+  including alternates), or **all** recipes to plan ahead (locked ones are marked)
+- optionally **uses your factory's current surplus** as free input
+- shows **building counts and clock speeds**, **power** against your grid's spare
+  capacity, **raw resources** with how many nodes that takes and how many free
+  nodes of each purity your map has left, the **belt or pipe tier** each link needs
+  (and when one isn't enough), **byproducts**, and the **build cost** of the machines
+- draws it all as a **flowchart** you can pan, zoom and rearrange; tap a box for
+  details, or tell the planner not to use a recipe
+- **plans are saved in Home Assistant** per save and shared by everyone using it
+
+Raw resources are weighted by how scarce they are on the map, so it prefers
+abundant ores. Recipes, unlocks and nodes come from FRM (`getRecipes`,
+`getSchematics`, `getResourceNode`) and are re-read every 10 minutes or with
+**Reload game data**. Power use, extractor rates and belt speeds are built into the
+integration. Next up: placing plans on the map, transport routes, and a tilted 3D
+map view.
+
 ## Production table card
 
 Every item your factory makes, live, with search, sorting and filters
