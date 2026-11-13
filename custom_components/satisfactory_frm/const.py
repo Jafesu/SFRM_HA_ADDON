@@ -68,3 +68,15 @@ MAP_LAYERS: Final[dict[str, tuple[str, bool]]] = {
     "drop_pods": ("getDropPod", False),
     "unlock_items": ("getUnlockItems", False),
 }
+
+# Read-only FRM endpoints the planner may request through the websocket API.
+GAME_DATA_ENDPOINTS: Final = (
+    "getRecipes",
+    "getSchematics",
+    "getResearchTrees",
+    "getResourceNode",
+    "getResourceWell",
+    "getResourceGeyser",
+    "getResourceDeposit",
+    "getFrackingActivator",
+)

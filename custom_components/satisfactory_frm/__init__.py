@@ -35,6 +35,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLOW_INTERVAL,
     DOMAIN,
+    GAME_DATA_ENDPOINTS,
     MAP_BOUNDS,
     MAP_LAYERS,
 )
@@ -54,7 +55,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.7.0"
+CARD_VERSION = "0.7.1"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -83,6 +84,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     websocket_api.async_register_command(hass, ws_servers)
     websocket_api.async_register_command(hass, ws_map_info)
     websocket_api.async_register_command(hass, ws_map_layer)
+    websocket_api.async_register_command(hass, ws_game_data)
     websocket_api.async_register_command(hass, ws_production)
     websocket_api.async_register_command(hass, ws_pipelines)
     websocket_api.async_register_command(hass, ws_ping)
@@ -305,6 +307,34 @@ async def ws_map_layer(
     endpoint, _ = MAP_LAYERS[msg["layer"]]
     try:
         result: Any = await entry.runtime_data.client.get_list(endpoint)
+    except FRMError as err:
+        connection.send_error(msg["id"], "frm_error", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "satisfactory_frm/game_data",
+        vol.Required("entry_id"): str,
+        vol.Required("endpoint"): vol.In(GAME_DATA_ENDPOINTS),
+    }
+)
+@websocket_api.async_response
+async def ws_game_data(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Read-only game data for the planner (recipes, resource nodes, unlocks)."""
+    entry = _loaded_entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "Server not loaded")
+        return
+    data = entry.runtime_data.fast.data
+    if not data or not data.world_ready:
+        connection.send_error(msg["id"], "not_ready", "World not ready")
+        return
+    try:
+        result: Any = await entry.runtime_data.client.get(msg["endpoint"])
     except FRMError as err:
         connection.send_error(msg["id"], "frm_error", str(err))
         return
