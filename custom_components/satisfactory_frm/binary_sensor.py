@@ -14,7 +14,14 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import FRMFastCoordinator
-from .entity import FRMConfigEntry, FRMSaveEntityMixin, FRMServerEntity, save_device, save_uid
+from .entity import (
+    FRMConfigEntry,
+    FRMSaveEntityMixin,
+    FRMServerEntity,
+    claim,
+    save_device,
+    save_uid,
+)
 
 
 async def async_setup_entry(
@@ -25,8 +32,6 @@ async def async_setup_entry(
     fast = entry.runtime_data.fast
     async_add_entities([ReachableSensor(fast), WorldReadySensor(fast), PausedSensor(fast)])
 
-    added: set[tuple[str, int]] = set()
-
     @callback
     def _add_circuits() -> None:
         data = fast.data
@@ -34,8 +39,7 @@ async def async_setup_entry(
             return
         new = []
         for cid in data.circuits:
-            if (data.save, cid) not in added:
-                added.add((data.save, cid))
+            if claim(entry, "binary_sensor", data.save, f"circuit:{cid}"):
                 new += [
                     FuseSensor(fast, data.save, cid),
                     NoPowerSensor(fast, data.save, cid),

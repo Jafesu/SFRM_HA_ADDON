@@ -61,11 +61,18 @@ the entry rather than re-adding it.
     Standby, No power or Not configured, with recipe, productivity, clock speed,
     power draw, circuit, shards and somersloops as attributes
   - a **run/standby switch** per building (needs the token). Buildings in standby
-    draw no power, so these work well for load shedding
+    draw no power, so these work well for load shedding. FRM doesn't report whether
+    a generator is in standby, so generator switches show the last state set from
+    HA (shown with separate on/off buttons)
   - an **All &lt;recipe&gt;** switch per recipe that puts every building on it into
     standby or back to work at once (none for generators, on purpose)
   - names look like "Constructor Iron Plate 3", numbered in build order; rename
-    freely in HA. Demolished buildings' entities are removed automatically
+    freely in HA. The HUB's built-in burners are named "HUB Biomass Burner"
+
+Things you dismantle in game (buildings, power circuits, power switches, and
+production lines with no buildings left) have their entities and empty devices
+removed automatically, once they've been gone for 5 minutes while their save is
+loaded.
 
 When a different save loads, the old save's entities go unavailable and come back
 with their history if you load that save again. To remove them for good, run the

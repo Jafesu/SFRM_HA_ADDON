@@ -10,7 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import FRMError
 from .coordinator import FRMFastCoordinator
-from .entity import FRMConfigEntry, FRMSaveEntityMixin, save_device, save_uid
+from .entity import FRMConfigEntry, FRMSaveEntityMixin, claim, save_device, save_uid
 from .switch import switch_name, switch_priority
 
 
@@ -20,7 +20,6 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     fast = entry.runtime_data.fast
-    added: set[tuple[str, str]] = set()
 
     @callback
     def _add() -> None:
@@ -30,8 +29,7 @@ async def async_setup_entry(
         new = []
         for sid, raw in data.switches.items():
             # Only priority switches report a priority value.
-            if switch_priority(raw) is not None and (data.save, sid) not in added:
-                added.add((data.save, sid))
+            if switch_priority(raw) is not None and claim(entry, "number", data.save, f"switch:{sid}"):
                 new.append(SwitchPriority(fast, data.save, sid))
         if new:
             async_add_entities(new)

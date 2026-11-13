@@ -8,6 +8,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 import asyncio
@@ -21,12 +22,13 @@ from .buildings import (
     is_running,
     recipe_of,
     recipe_slug,
+    reports_standby,
     status_of,
     type_name,
 )
 from .const import CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES
 from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
-from .entity import FRMConfigEntry, FRMSaveEntityMixin, save_device, save_uid
+from .entity import FRMConfigEntry, FRMSaveEntityMixin, claim, save_device, save_uid
 
 _LOGGER = logging.getLogger(__name__)
 VERIFY_DELAY = 2.0  # seconds for the game to apply standby before re-checking
@@ -56,7 +58,6 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     fast = entry.runtime_data.fast
-    added: set[tuple[str, str]] = set()
 
     @callback
     def _add() -> None:
@@ -65,8 +66,7 @@ async def async_setup_entry(
             return
         new = []
         for sid in data.switches:
-            if (data.save, sid) not in added:
-                added.add((data.save, sid))
+            if claim(entry, "switch", data.save, f"switch:{sid}"):
                 new.append(PowerSwitch(fast, data.save, sid))
         if new:
             async_add_entities(new)
@@ -77,7 +77,6 @@ async def async_setup_entry(
     if not entry.options.get(CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES):
         return
     slow = entry.runtime_data.slow
-    added_b: set[tuple[str, str]] = set()
 
     @callback
     def _add_buildings() -> None:
@@ -88,14 +87,11 @@ async def async_setup_entry(
         new: list[SwitchEntity] = []
         names = None
         for bid, raw in data.machines.items():
-            if (save, bid) not in added_b:
+            if claim(entry, "switch", save, f"building:{bid}"):
                 names = names or building_names(data.machines)
-                added_b.add((save, bid))
                 new.append(BuildingSwitch(slow, save, bid, names[bid], raw))
         for recipe in {recipe_of(r) for r in data.machines.values()} - NO_GROUP_SWITCH:
-            key = f"recipe:{recipe_slug(recipe)}"
-            if (save, key) not in added_b:
-                added_b.add((save, key))
+            if claim(entry, "switch", save, f"recipe:{recipe_slug(recipe)}"):
                 new.append(RecipeGroupSwitch(slow, save, recipe))
         if new:
             async_add_entities(new)
@@ -183,7 +179,11 @@ class _SlowSaveSwitch(FRMSaveEntityMixin, CoordinatorEntity[FRMSlowCoordinator],
             await self.coordinator.async_refresh()
 
         machines = self.coordinator.data.machines if self.coordinator.data else {}
-        unchanged = [b for b in sent if b in machines and is_running(machines[b]) != on]
+        # Buildings that don't report standby (generators) can't be checked.
+        unchanged = [
+            b for b in sent
+            if b in machines and reports_standby(machines[b]) and is_running(machines[b]) != on
+        ]
         if unchanged:
             kinds = sorted({type_name(machines[b]) for b in unchanged})
             _LOGGER.warning(
@@ -202,10 +202,16 @@ class _SlowSaveSwitch(FRMSaveEntityMixin, CoordinatorEntity[FRMSlowCoordinator],
             raise HomeAssistantError(f"{len(failed)} of {len(ids)} building(s) didn't change: {msg}")
 
 
-class BuildingSwitch(_SlowSaveSwitch):
-    """On = running, off = standby. Paused buildings draw no power."""
+class BuildingSwitch(_SlowSaveSwitch, RestoreEntity):
+    """On = running, off = standby. Paused buildings draw no power.
+
+    For buildings whose standby state FRM doesn't report (generators), the switch
+    shows the last state it was set to (restored across restarts) and reports
+    assumed_state, so HA shows separate on/off buttons.
+    """
 
     _attr_icon = "mdi:factory"
+    _commanded: bool | None = None
 
     def __init__(self, coordinator, save: str, bid: str, label: str, raw: dict[str, Any]) -> None:
         super().__init__(coordinator)
@@ -221,9 +227,27 @@ class BuildingSwitch(_SlowSaveSwitch):
     def available(self) -> bool:
         return self._slow_ok() and self._bid in self.coordinator.data.machines
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state in ("on", "off"):
+            self._commanded = last.state == "on"
+
+    def _raw(self) -> dict[str, Any] | None:
+        data = self.coordinator.data
+        return data.machines.get(self._bid) if data else None
+
+    @property
+    def assumed_state(self) -> bool:
+        raw = self._raw()
+        return raw is not None and not reports_standby(raw)
+
     @property
     def is_on(self) -> bool:
-        return is_running(self.coordinator.data.machines[self._bid])
+        raw = self._raw() or {}
+        if reports_standby(raw):
+            return is_running(raw)
+        return True if self._commanded is None else self._commanded
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -231,17 +255,28 @@ class BuildingSwitch(_SlowSaveSwitch):
         status = status_of(raw, self.coordinator.fast.data)
         return {
             "frm_id": self._bid,
+            "standby_reported": reports_standby(raw),
             "building": type_name(raw),
             "recipe": recipe_of(raw),
             "status": status,
             "status_label": STATUS_LABELS.get(status, status),
         }
 
+    async def _set(self, on: bool) -> None:
+        previous, self._commanded = self._commanded, on
+        try:
+            await self._apply([self._bid], on)
+        except Exception:
+            self._commanded = previous
+            raise
+        finally:
+            self.async_write_ha_state()
+
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._apply([self._bid], True)
+        await self._set(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._apply([self._bid], False)
+        await self._set(False)
 
 
 class RecipeGroupSwitch(_SlowSaveSwitch):

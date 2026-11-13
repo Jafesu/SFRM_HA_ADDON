@@ -95,6 +95,7 @@ class FastData:
     session_name: str | None = None
     circuits: dict[int, dict[str, Any]] = field(default_factory=dict)
     switches: dict[str, dict[str, Any]] = field(default_factory=dict)
+    switches_ok: bool = False  # getSwitches answered (an empty list is valid)
 
     @property
     def save(self) -> str | None:
@@ -170,6 +171,7 @@ class FRMFastCoordinator(DataUpdateCoordinator[FastData]):
                 sid = raw.get("ID")
                 if sid:
                     data.switches[str(sid)] = raw
+            data.switches_ok = True
         except FRMError as err:
             _LOGGER.debug("getSwitches failed: %s", err)
 

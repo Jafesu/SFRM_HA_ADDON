@@ -22,6 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 
 from .api import FRMClient, FRMError
+from .cleanup import StaleCleaner, sweep_fast, sweep_slow
 from .const import (
     ASSET_PREFIXES,
     CARD_URL,
@@ -52,7 +53,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.6.1"
+CARD_VERSION = "0.6.2"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -120,13 +121,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: FRMConfigEntry) -> bool:
     markers = MarkerStore(hass, entry.entry_id)
     await markers.async_load()
     entry.runtime_data = FRMRuntime(
-        client=client, fast=fast, slow=slow, asset_cache={}, markers=markers
+        client=client,
+        fast=fast,
+        slow=slow,
+        asset_cache={},
+        markers=markers,
+        cleaner=StaleCleaner(hass, entry),
     )
     # Make sure the server device exists before save-level devices link to it.
     dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, **server_device(entry, client.base_url)
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Remove entities for circuits, switches and buildings dismantled in game.
+    entry.async_on_unload(fast.async_add_listener(lambda: sweep_fast(entry)))
+    entry.async_on_unload(slow.async_add_listener(lambda: sweep_slow(entry)))
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 

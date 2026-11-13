@@ -25,7 +25,6 @@ from .buildings import (
     building_names,
     recipe_of,
     remove_all_building_entities,
-    remove_stale_buildings,
     status_of,
     type_name,
 )
@@ -35,6 +34,7 @@ from .entity import (
     FRMConfigEntry,
     FRMSaveEntityMixin,
     FRMServerEntity,
+    claim,
     save_device,
     save_uid,
 )
@@ -257,8 +257,6 @@ async def async_setup_entry(
 
     async_add_entities(SessionSensor(fast, d) for d in SESSION_SENSORS)
 
-    added_circuits: set[tuple[str, int]] = set()
-
     @callback
     def _add_circuits() -> None:
         data = fast.data
@@ -266,16 +264,13 @@ async def async_setup_entry(
             return
         new = []
         for cid in data.circuits:
-            if (data.save, cid) in added_circuits:
+            if not claim(entry, "sensor", data.save, f"circuit:{cid}"):
                 continue
-            added_circuits.add((data.save, cid))
             new.extend(CircuitSensor(fast, data.save, cid, d) for d in CIRCUIT_SENSORS)
         if new:
             async_add_entities(new)
 
-    added_slow: set[tuple[str, str, str]] = set()
     cleaned_saves: set[str] = set()
-    cleaned_buildings: set[str] = set()
     buildings_on = entry.options.get(CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES)
     if not buildings_on:
         remove_all_building_entities(hass, entry)
@@ -287,8 +282,7 @@ async def async_setup_entry(
             return
         save = fdata.save
         new: list[SensorEntity] = []
-        if data.factory and (save, "__factory__", "") not in added_slow:
-            added_slow.add((save, "__factory__", ""))
+        if data.factory and claim(entry, "sensor", save, "factory"):
             new.extend(FactorySensor(slow, save, d) for d in FACTORY_SENSORS)
 
         plan = item_plan(entry.options, data.prod)
@@ -301,19 +295,14 @@ async def async_setup_entry(
                 continue
             name = data.prod[key].get("Name") or key
             for d in ITEM_SENSORS:
-                if d.key in wanted and (save, key, d.key) not in added_slow:
-                    added_slow.add((save, key, d.key))
+                if d.key in wanted and claim(entry, "sensor", save, f"item:{key}:{d.key}"):
                     new.append(ItemSensor(slow, save, key, name, d))
         if buildings_on and data.machines:
-            if data.machines_ok and save not in cleaned_buildings:
-                cleaned_buildings.add(save)
-                remove_stale_buildings(hass, entry, save, data.machines)
             names = None
             for bid, raw in data.machines.items():
-                if (save, bid, "building") in added_slow:
+                if not claim(entry, "sensor", save, f"building:{bid}"):
                     continue
                 names = names or building_names(data.machines)
-                added_slow.add((save, bid, "building"))
                 new.append(BuildingStatusSensor(slow, save, bid, names[bid], raw))
         if new:
             async_add_entities(new)

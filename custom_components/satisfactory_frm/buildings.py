@@ -46,8 +46,15 @@ def recipe_of(raw: dict[str, Any]) -> str:
     return UNCONFIGURED
 
 
+# FRM gives some different buildings the same display name; these get their own,
+# so devices and entity names don't collide.
+TYPE_NAMES = {
+    "Build_GeneratorIntegratedBiomass_C": "HUB Biomass Burner",
+}
+
+
 def type_name(raw: dict[str, Any]) -> str:
-    return raw.get("Name") or raw.get("ClassName") or "Building"
+    return TYPE_NAMES.get(raw.get("ClassName", "")) or raw.get("Name") or raw.get("ClassName") or "Building"
 
 
 # No "All ..." group switch for these: unconfigured machines do nothing, and a
@@ -67,18 +74,30 @@ def _id_number(bid: str) -> int:
 def building_names(machines: dict[str, dict[str, Any]]) -> dict[str, str]:
     """Stable per-building labels: "<recipe>" or "<recipe> <n>" within a building type.
 
+    Grouped by display name (not class), so two classes that share a name can never
+    produce the same "<type> <recipe> <n>" label.
+
     Numbered by FRM ID order, so existing buildings keep their number when new
     ones are built (new IDs are higher).
     """
     groups: dict[tuple[str, str], list[str]] = {}
     for bid, raw in machines.items():
-        groups.setdefault((raw.get("ClassName", ""), recipe_of(raw)), []).append(bid)
+        groups.setdefault((type_name(raw), recipe_of(raw)), []).append(bid)
     names: dict[str, str] = {}
     for (_, recipe), ids in groups.items():
         ids.sort(key=_id_number)
         for n, bid in enumerate(ids, start=1):
             names[bid] = recipe if len(ids) == 1 else f"{recipe} {n}"
     return names
+
+
+def reports_standby(raw: dict[str, Any]) -> bool:
+    """False if FRM doesn't say whether this building is in standby.
+
+    getGenerators has no IsPaused field (seen on FRM 1.5.0-dev.6), so generator
+    switches can't read their state back and keep the last commanded one instead.
+    """
+    return "IsPaused" in raw
 
 
 def is_running(raw: dict[str, Any]) -> bool:
@@ -108,31 +127,6 @@ def status_of(raw: dict[str, Any], fast: FastData | None) -> str:
             return "producing"
         return "idle"
     return "producing" if raw.get("IsProducing") else "idle"
-
-
-@callback
-def remove_stale_buildings(
-    hass: HomeAssistant, entry: FRMConfigEntry, save: str, machines: dict[str, dict[str, Any]]
-) -> None:
-    """Remove entities for demolished buildings and recipes no longer in use."""
-    reg = er.async_get(hass)
-    prefix = f"{entry.entry_id}|save:{save}|"
-    recipes = {
-        recipe_slug(recipe_of(r)) for r in machines.values() if recipe_of(r) not in NO_GROUP_SWITCH
-    }
-    for ent in er.async_entries_for_config_entry(reg, entry.entry_id):
-        uid = ent.unique_id or ""
-        if not uid.startswith(prefix):
-            continue
-        rest = uid[len(prefix):]
-        if rest.startswith("building:"):
-            bid = rest[len("building:"):].rsplit(":", 1)[0]
-            if bid not in machines:
-                reg.async_remove(ent.entity_id)
-        elif rest.startswith("recipe:"):
-            slug = rest[len("recipe:"):].rsplit(":", 1)[0]
-            if slug not in recipes:
-                reg.async_remove(ent.entity_id)
 
 
 @callback

@@ -9,7 +9,7 @@ with their history when that save is loaded again.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
@@ -22,6 +22,7 @@ from .const import DOMAIN
 
 if TYPE_CHECKING:
     from .api import FRMClient
+    from .cleanup import StaleCleaner
     from .markers import MarkerStore
     from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
 
@@ -33,6 +34,21 @@ class FRMRuntime:
     slow: FRMSlowCoordinator
     asset_cache: dict[str, tuple[bytes, str]]
     markers: MarkerStore
+    cleaner: StaleCleaner
+    # Save-level objects the platforms have created entities for:
+    # (platform, save slug, object key). The cleaner forgets an object when it
+    # removes its entities, so it is re-created if it comes back.
+    added: set[tuple[str, str, str]] = field(default_factory=set)
+
+
+def claim(entry: ConfigEntry, platform: str, save: str, okey: str) -> bool:
+    """True the first time a platform sees this object in this save."""
+    added = entry.runtime_data.added
+    key = (platform, save, okey)
+    if key in added:
+        return False
+    added.add(key)
+    return True
 
 
 type FRMConfigEntry = ConfigEntry[FRMRuntime]
@@ -95,7 +111,13 @@ class FRMSaveEntityMixin:
         if not ent or not ent.device_id:
             return
         dev_reg = dr.async_get(hass)
-        server = dev_reg.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+        server = next(
+            (
+                d for d in dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
+                if (DOMAIN, entry.entry_id) in d.identifiers
+            ),
+            None,
+        )
         device = dev_reg.async_get(ent.device_id)
         if server and device and device.via_device_id != server.id:
             dev_reg.async_update_device(device.id, via_device_id=server.id)
