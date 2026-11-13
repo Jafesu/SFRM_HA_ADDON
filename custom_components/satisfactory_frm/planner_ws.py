@@ -101,6 +101,8 @@ class PlannerData:
             "targets": plan.get("targets", old.get("targets", [])),
             "options": plan.get("options", old.get("options", {})),
             "positions": plan.get("positions", old.get("positions", {})),
+            "mode": plan.get("mode", old.get("mode", "solve")),
+            "graph": plan.get("graph", old.get("graph", {"nodes": [], "links": []})),
             "notes": str(plan.get("notes", old.get("notes", "")))[:2000],
             "created": old.get("created", time.time()),
             "created_by": old.get("created_by", user),
@@ -184,13 +186,16 @@ def model_summary(model: GameModel) -> dict[str, Any]:
             for r in sorted(model.recipes.values(), key=lambda r: r.name)
         ],
         "buildings": {
-            b: {"name": v["name"], "unlocked": v["unlocked"]}
+            b: {"name": v["name"], "unlocked": v["unlocked"], "cost": v.get("cost", {})}
             for b, v in model.buildings.items()
             if b in {r.building for r in model.recipes.values()} or b in BELT_SPEEDS or b in PIPE_SPEEDS
         },
         "resources": model.resources,
         "weights": model.weights,
         "belt": model.best_belt(),
+        # Unlocked transport tiers, slowest first: [class, name, per minute].
+        "belts": sorted(([b, model.building_name(b), v] for b, v in model.unlocked_buildings(BELT_SPEEDS)), key=lambda x: x[2]),
+        "pipes": sorted(([b, model.building_name(b), v] for b, v in model.unlocked_buildings(PIPE_SPEEDS)), key=lambda x: x[2]),
         "pipe": model.best_pipe(),
         "miner": model.best_miner(),
     }
@@ -235,6 +240,37 @@ async def ws_model(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
         "power": power_headroom(entry),
     })
 
+
+# Design-mode graph (see sfrm-planner.js). Kept loose but bounded.
+_NODE = vol.Schema(
+    {
+        vol.Required("id"): vol.All(str, vol.Length(max=40)),
+        vol.Required("type"): vol.In(["machine", "supply", "output", "hub"]),
+        vol.Optional("recipe"): vol.All(str, vol.Length(max=120)),
+        vol.Optional("count"): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
+        vol.Optional("clock"): vol.All(vol.Coerce(float), vol.Range(min=1, max=250)),
+        vol.Optional("item"): vol.Any(None, vol.All(str, vol.Length(max=120))),
+        vol.Optional("rate"): vol.All(vol.Coerce(float), vol.Range(min=0, max=1e6)),
+        vol.Optional("want"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=1e6))),
+        vol.Optional("label"): vol.All(str, vol.Length(max=80)),
+        vol.Required("x"): vol.Coerce(float),
+        vol.Required("y"): vol.Coerce(float),
+    }
+)
+_LINK = vol.Schema(
+    {
+        vol.Required("id"): vol.All(str, vol.Length(max=40)),
+        vol.Required("from"): vol.All(str, vol.Length(max=40)),
+        vol.Required("to"): vol.All(str, vol.Length(max=40)),
+        vol.Required("item"): vol.All(str, vol.Length(max=120)),
+    }
+)
+GRAPH_SCHEMA = vol.Schema(
+    {
+        vol.Required("nodes"): vol.All([_NODE], vol.Length(max=500)),
+        vol.Required("links"): vol.All([_LINK], vol.Length(max=2000)),
+    }
+)
 
 TARGET_SCHEMA = vol.All(
     [{vol.Required("item"): str, vol.Required("rate"): vol.All(vol.Coerce(float), vol.Range(min=0, max=1e6))}],
@@ -304,6 +340,8 @@ def ws_plans(hass: HomeAssistant, connection: websocket_api.ActiveConnection, ms
                 vol.Optional("options"): OPTIONS_SCHEMA,
                 vol.Optional("positions"): vol.Schema({str: [vol.Coerce(float)]}),
                 vol.Optional("notes"): str,
+                vol.Optional("mode"): vol.In(["solve", "design"]),
+                vol.Optional("graph"): GRAPH_SCHEMA,
             }
         ),
     }

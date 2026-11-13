@@ -177,6 +177,21 @@ live save:
   details, or tell the planner not to use a recipe
 - **plans are saved in Home Assistant** per save and shared by everyone using it
 
+**Design mode** lets you build the factory yourself instead:
+
+- drag buildings (any recipe you've unlocked), **supplies**, **outputs** and
+  **splitter/mergers** from the palette onto the canvas, or tap to add
+- drag from a port to another box to **connect** them; drop a connection on empty
+  space to pick a building that uses (or makes) that item, sized to match
+- set **machine count and clock speed**, change recipe, duplicate, delete, undo/redo
+- the maths updates live: each machine's real speed from what actually reaches it
+  (shortages ripple downstream), the flow on every link and the belt or pipe tier it
+  needs, and an **issues** list (unconnected or short inputs, outputs with nowhere to
+  go, overloaded links)
+- **Match inputs** sets a machine's clock to use exactly what arrives; **Fill
+  shortages** asks the solver for whatever the design is missing and wires it in
+- **Edit as design** turns a solved plan into a design you can adjust
+
 Raw resources are weighted by how scarce they are on the map, so it prefers
 abundant ores. Recipes, unlocks and nodes come from FRM (`getRecipes`,
 `getSchematics`, `getResourceNode`) and are re-read every 10 minutes or with

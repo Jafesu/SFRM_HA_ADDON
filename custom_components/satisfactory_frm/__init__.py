@@ -58,7 +58,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.8.0"
+CARD_VERSION = "0.9.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:

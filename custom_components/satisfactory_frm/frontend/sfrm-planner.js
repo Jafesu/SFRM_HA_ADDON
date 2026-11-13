@@ -8,7 +8,7 @@
  * No third-party dependencies.
  */
 
-const PLANNER_VERSION = "0.8.0";
+const PLANNER_VERSION = "0.9.0";
 
 (() => {
   if (document.querySelector("link[data-sfrm-fonts]")) return;
@@ -109,6 +109,19 @@ table.t td.r{text-align:right;font-family:'JetBrains Mono',monospace;white-space
 .warn{border:1px solid #6b5224;background:#221a0b;color:#fbe2b0;border-radius:8px;padding:10px;font-size:13px;line-height:1.45}
 .err{border:1px solid #6e2a26;background:#2a1012;color:#ffc9c4;border-radius:8px;padding:10px;font-size:13px;line-height:1.45}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1d2430;border:1px solid ${PC.amber};color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;z-index:30;max-width:min(560px,calc(100vw - 32px))}
+.palist{display:flex;flex-direction:column;gap:4px;max-height:42vh;overflow:auto}
+.pal{display:flex;align-items:center;gap:6px;flex-wrap:wrap;text-align:left;background:${PC.well};border:1px solid ${PC.line2};border-radius:8px;padding:8px 10px;min-height:44px;cursor:grab;touch-action:none}
+.pal:hover{border-color:#3a4454}
+.pal .t{font-size:13px;font-weight:600;flex:1 1 auto}
+.pal .muted{flex:1 1 100%;font-size:11px}
+.dragghost{position:fixed;z-index:40;pointer-events:none;background:#1d2430;border:1px solid ${PC.orange};color:#fff;border-radius:8px;padding:6px 10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.cmenu{position:absolute;z-index:10;width:260px;max-height:320px;overflow:auto;background:#121822;border:1px solid ${PC.orange};border-radius:10px;padding:4px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.mi{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:6px;padding:8px;min-height:40px;font-size:13px;cursor:pointer}
+.mi:hover,.mi:focus-visible{background:#1d2633}
+.fld{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.fld input,.fld select{width:100%}
+.port{cursor:crosshair}
+.port:hover{stroke:${PC.orange};stroke-width:2.5}
 .narrow-only,.mid-only{display:none}
 @media (max-width:1100px) and (min-width:761px){.mid-only{display:inline-block}}
 .node{cursor:pointer}
@@ -196,11 +209,12 @@ class SfrmPlannerPanel extends HTMLElement {
               <button class="btn ghost icon" data-act="relayout" aria-label="Reset layout" title="Reset layout">↺</button>
             </div>
             <div class="detail" id="detail" hidden></div>
+            <div class="cmenu" id="cmenu" hidden role="menu"></div>
           </main>
           <aside class="pane side right" id="sumPane" aria-label="Summary"></aside>
         </div>
       </div>
-      <datalist id="items"></datalist>`;
+      <datalist id="items"></datalist><datalist id="allitems"></datalist>`;
     this.$ = (id) => root.getElementById(id);
     // HA's own menu button (opens the sidebar on narrow screens), if available.
     if (customElements.get("ha-menu-button")) {
@@ -218,11 +232,19 @@ class SfrmPlannerPanel extends HTMLElement {
     root.addEventListener("change", (e) => this._onChange(e));
     root.addEventListener("input", (e) => this._onInput(e));
     root.addEventListener("keydown", (e) => {
+      const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName || "");
+      if (this._isDesign() && !typing) {
+        if ((e.key === "Delete" || e.key === "Backspace") && this._sel) { e.preventDefault(); this._deleteSel(); return; }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); this._undoRedo(e.shiftKey ? 1 : -1); return; }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); this._undoRedo(1); return; }
+        if (e.key === "Escape") { this.$("cmenu").hidden = true; this._selectDesign(null); return; }
+      }
       if (e.key === "Enter" && e.target.id === "addItem") this._addTarget();
       const node = e.target.closest?.(".node");
       if (node && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); this._select(node.dataset.id); }
     });
     this._initFlow();
+    this._initPalette();
     this._setTab("plan");
     this._loadServers();
   }
@@ -263,6 +285,10 @@ class SfrmPlannerPanel extends HTMLElement {
     this._recipeByCls = Object.fromEntries((this._model.recipes || []).map((r) => [r.cls, r]));
     this.$("items").innerHTML = (this._model.producible || [])
       .map((c) => `<option value="${pesc(this._items[c]?.name || c)}"></option>`).join("");
+    this._allNameToCls = {};
+    const allItems = Object.keys(this._items).sort((a, b) => (this._items[a].name || a).localeCompare(this._items[b].name || b));
+    for (const c of allItems) this._allNameToCls[(this._items[c].name || c).toLowerCase()] = c;
+    this.$("allitems").innerHTML = allItems.map((c) => `<option value="${pesc(this._items[c].name || c)}"></option>`).join("");
     this._nameToCls = {};
     for (const c of this._model.producible || []) this._nameToCls[(this._items[c]?.name || c).toLowerCase()] = c;
     await this._loadPlans();
@@ -308,15 +334,35 @@ class SfrmPlannerPanel extends HTMLElement {
       case "exclude": this._toggleRecipe(arg, false); break;
       case "include": this._toggleRecipe(arg, true); break;
       case "zoom": this._zoomBy(Number(arg)); break;
-      case "fit": this._fit(); break;
-      case "relayout": this._plan.positions = {}; this._markDirty(); this._renderFlow(true); break;
+      case "fit": if (this._isDesign()) this._fitDesign(); else this._fit(); break;
+      case "relayout":
+        if (this._isDesign()) { this._fitDesign(); break; }
+        this._plan.positions = {}; this._markDirty(); this._renderFlow(true); break;
       case "close-detail": this._select(null); break;
+      case "mode": this._setMode(arg); break;
+      case "to-design": this._toDesign(); break;
+      case "undo": this._undoRedo(-1); break;
+      case "redo": this._undoRedo(1); break;
+      case "fill": this._fill(); break;
+      case "clear-design": if (confirm("Remove everything from this design?")) this._mutate((g) => { g.nodes = []; g.links = []; }, { pane: true }); break;
+      case "del-sel": this._deleteSel(); break;
+      case "dup": this._duplicate(); break;
+      case "balance": this._balance(); break;
+      case "menu-pick": this._menuPick(arg); break;
+      case "menu-close": this.$("cmenu").hidden = true; this._pendingWire = null; break;
+      case "goto": {
+        const pr = this._ev?.problems?.[Number(arg)];
+        const id = pr?.node || pr?.link;
+        if (id) { if (matchMedia("(max-width:760px)").matches) this._setTab("flow"); this._selectDesign(id); this._centerOn(id); }
+        break;
+      }
       default: break;
     }
   }
 
   _onChange(e) {
     const t = e.target;
+    if (t.dataset.field && this._isDesign()) { this._designField(t.dataset.field, t.value); return; }
     if (t.id === "server") {
       this._entry = t.value;
       try { localStorage.setItem("sfrm_planner_server", t.value); } catch (_) {}
@@ -341,6 +387,17 @@ class SfrmPlannerPanel extends HTMLElement {
 
   _onInput(e) {
     const t = e.target;
+    if (t.id === "palQ") {
+      this._paletteQ = t.value;
+      clearTimeout(this._palT);
+      this._palT = setTimeout(() => {
+        const pos = t.selectionStart;
+        this._renderPlanPane();
+        const q = this.shadowRoot.getElementById("palQ");
+        if (q) { q.focus(); q.setSelectionRange(pos, pos); }
+      }, 150);
+      return;
+    }
     if (t.dataset.planname !== undefined) {
       this._plan.name = t.value;
       this.shadowRoot.querySelectorAll("[data-planname]").forEach((el) => { if (el !== t) el.value = t.value; });
@@ -433,6 +490,7 @@ class SfrmPlannerPanel extends HTMLElement {
 
   async _solve() {
     if (!this._model) return;
+    if (this._isDesign()) { this._renderDesignFlow(this._fitNext || !this._laidOut); this._fitNext = false; this._renderSummary(); this._renderPlanPane(); return; }
     const targets = this._plan.targets.filter((t) => t.rate > 0);
     if (!targets.length) {
       this._result = null;
@@ -463,6 +521,7 @@ class SfrmPlannerPanel extends HTMLElement {
   // ------------------------------------------------------------- plan pane
   _renderPlanPane(message) {
     const pane = this.$("planPane");
+    if (!message && this._model && this._isDesign()) { this._renderDesignPane(); return; }
     if (message) { pane.innerHTML = `<div class="panel"><div class="muted" style="font-size:14px;line-height:1.5">${pesc(message)}</div></div>`; return; }
     if (!this._model) { pane.innerHTML = `<div class="panel"><div class="muted">Loading…</div></div>`; return; }
     const focusId = this.shadowRoot.activeElement?.dataset?.rate;
@@ -490,6 +549,7 @@ class SfrmPlannerPanel extends HTMLElement {
       .slice(0, 12);
     const surplusN = Object.keys(this._model.surplus || {}).length;
     pane.innerHTML = `
+      ${this._modeSwitch()}
       <section class="panel narrow-only" aria-label="Plan name">
         <h2>PLAN</h2>
         <div class="add"><input type="text" data-planname value="${pesc(p.name || "")}" placeholder="Plan name" aria-label="Plan name" style="grid-column:1/-1"></div>
@@ -510,6 +570,7 @@ class SfrmPlannerPanel extends HTMLElement {
           <button class="switch" role="switch" aria-checked="${!!o.use_surplus}" data-act="surplus" aria-label="Use factory surplus"><span></span></button></div>
         ${o.recipes === "all" ? `<div class="muted">Plans with ALL recipes can use ones you haven't unlocked; they're marked LOCKED.</div>` : ""}
       </section>
+      ${r?.ok && r.steps.length ? `<button class="btn" data-act="to-design" style="width:100%">EDIT AS DESIGN</button>` : ""}
       ${usedHtml ? `<section class="panel" aria-label="Recipes used"><h2>RECIPES USED</h2><div class="rlist">${usedHtml}</div>
         <div class="muted" style="margin-top:8px">✕ stops the planner using a recipe.</div></section>` : ""}
       ${altChoices.length ? `<section class="panel" aria-label="Alternates available"><h2>ALTERNATES AVAILABLE</h2><div class="rlist">${altChoices.map((rc) =>
@@ -542,6 +603,20 @@ class SfrmPlannerPanel extends HTMLElement {
         drag = null;
         return;
       }
+      if (this._isDesign()) {
+        this.$("cmenu").hidden = true;
+        const port = e.target.closest(".port");
+        if (port) { drag = this._startWire(port, e); moved = false; return; }
+        const lk = e.target.closest(".linkhit, .linklabel");
+        if (lk) { drag = { kind: "link", id: lk.dataset.link }; return; }
+        const dn = e.target.closest(".node");
+        if (dn) {
+          const n = this._plan.graph.nodes.find((x) => x.id === dn.dataset.id);
+          const [wx, wy] = toWorld(e.clientX, e.clientY);
+          drag = { kind: "dnode", n, dx: wx - n.x, dy: wy - n.y, before: JSON.stringify(this._plan.graph) };
+          return;
+        }
+      }
       const node = e.target.closest(".node");
       if (node) {
         const id = node.dataset.id, pos = this._pos[id];
@@ -563,6 +638,19 @@ class SfrmPlannerPanel extends HTMLElement {
         return;
       }
       if (!drag) return;
+      if (drag.kind === "wire") { moved = true; this._moveWire(drag, e.clientX, e.clientY); return; }
+      if (drag.kind === "link") return;
+      if (drag.kind === "dnode") {
+        const [wx, wy] = toWorld(e.clientX, e.clientY);
+        const nx = Math.round(wx - drag.dx), ny = Math.round(wy - drag.dy);
+        if (Math.abs(nx - drag.n.x) + Math.abs(ny - drag.n.y) > 2 || moved) {
+          moved = true;
+          drag.n.x = nx;
+          drag.n.y = ny;
+          this._drawDesign();
+        }
+        return;
+      }
       if (drag.kind === "pan") {
         const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
         if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
@@ -584,6 +672,18 @@ class SfrmPlannerPanel extends HTMLElement {
     const end = (e) => {
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinch = null;
+      if (drag?.kind === "wire") { if (e.type === "pointerup") this._endWire(drag, e.clientX, e.clientY); else this.shadowRoot.getElementById("wire")?.setAttribute("d", ""); drag = null; return; }
+      if (drag?.kind === "link") { this._selectDesign(drag.id); drag = null; return; }
+      if (drag?.kind === "dnode") {
+        if (moved) {
+          (this._undo ||= []).push(drag.before);
+          this._redo = [];
+          this._markDirty();
+          this._renderProblems();
+        } else this._selectDesign(drag.n.id);
+        drag = null;
+        return;
+      }
       if (drag?.kind === "node") {
         if (moved) this._markDirty();
         else this._select(drag.id);
@@ -622,11 +722,12 @@ class SfrmPlannerPanel extends HTMLElement {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const n of nodes) {
       const [x, y] = this._pos[n.id];
-      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + NODE_W); y1 = Math.max(y1, y + n.h);
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + (n.w || NODE_W)); y1 = Math.max(y1, y + n.h);
     }
     const pad = 40;
     // Don't shrink below readable: big plans start at the left edge, pan for the rest.
-    const k = Math.min(1.1, Math.max(0.62, Math.min((r.width - pad * 2) / (x1 - x0), (r.height - pad * 2) / (y1 - y0))));
+    const minK = r.width < 600 ? 0.4 : 0.62;
+    const k = Math.min(1.1, Math.max(minK, Math.min((r.width - pad * 2) / (x1 - x0), (r.height - pad * 2) / (y1 - y0))));
     const fitsX = (x1 - x0) * k <= r.width - pad * 2, fitsY = (y1 - y0) * k <= r.height - pad * 2;
     this._view = {
       k,
@@ -637,6 +738,7 @@ class SfrmPlannerPanel extends HTMLElement {
   }
 
   _renderFlow(fit) {
+    if (this._isDesign()) { this._renderDesignFlow(fit); return; }
     const empty = this.$("emptyFlow");
     const r = this._result;
     if (!r || !r.ok) {
@@ -663,6 +765,7 @@ class SfrmPlannerPanel extends HTMLElement {
   }
 
   _drawGraph() {
+    if (this._isDesign()) { this._drawDesign(); return; }
     const nodes = this._nodes, edges = this._edges, pos = this._pos;
     const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
     // Ports: spread each node's outgoing and incoming edges along its sides.
@@ -704,6 +807,7 @@ class SfrmPlannerPanel extends HTMLElement {
   }
 
   _select(id) {
+    if (this._isDesign()) { this._selectDesign(id); return; }
     this._sel = id;
     const box = this.$("detail");
     const n = (this._nodes || []).find((x) => x.id === id);
@@ -736,6 +840,7 @@ class SfrmPlannerPanel extends HTMLElement {
 
   // ------------------------------------------------------------- summary
   _renderSummary() {
+    if (this._isDesign() && this._model) { this._renderDesignSummary(); return; }
     const pane = this.$("sumPane");
     const r = this._result;
     if (!r || !r.ok) {
@@ -788,7 +893,7 @@ class SfrmPlannerPanel extends HTMLElement {
     this._tab = tab;
     this.$("body").dataset.tab = tab;
     this.shadowRoot.querySelectorAll(".tab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.arg === tab)));
-    if (tab === "flow") requestAnimationFrame(() => (this._laidOut ? this._fit() : null));
+    if (tab === "flow") requestAnimationFrame(() => (!this._laidOut ? null : this._isDesign() ? this._fitDesign() : this._fit()));
   }
   _name(cls) { return this._items?.[cls]?.name || cls; }
   _status(msg, dirty = false) {
@@ -807,7 +912,7 @@ class SfrmPlannerPanel extends HTMLElement {
 
 // ------------------------------------------------------------------ plan helpers
 function blankPlan() {
-  return { id: null, name: "", targets: [], options: { recipes: "unlocked", disabled: [], enabled: [], use_surplus: false }, positions: {} };
+  return { id: null, name: "", mode: "solve", graph: { nodes: [], links: [] }, targets: [], options: { recipes: "unlocked", disabled: [], enabled: [], use_surplus: false }, positions: {} };
 }
 function clonePlan(p) {
   const b = blankPlan();
@@ -816,10 +921,12 @@ function clonePlan(p) {
     options: { ...b.options, ...(p.options || {}) },
     positions: { ...(p.positions || {}) },
     targets: (p.targets || []).map((t) => ({ item: t.item, rate: Number(t.rate) || 0 })),
+    mode: p.mode === "design" ? "design" : "solve",
+    graph: { nodes: [...(p.graph?.nodes || [])].map((n) => ({ ...n })), links: [...(p.graph?.links || [])].map((l) => ({ ...l })) },
   };
 }
 function toWire(p) {
-  const out = { name: p.name, targets: p.targets, options: p.options, positions: p.positions, notes: p.notes || "" };
+  const out = { name: p.name, targets: p.targets, options: p.options, positions: p.positions, notes: p.notes || "", mode: p.mode, graph: p.graph };
   if (p.id) out.id = p.id;
   return out;
 }
@@ -948,6 +1055,862 @@ function nodeBody(n, selected) {
   }
   return body;
 }
+
+// ================================================================== design mode
+// A plan in design mode is a graph you build by hand:
+//   nodes: machine {recipe, count, clock} | supply {item, rate, label}
+//          | output {item, want} | hub (splitter/merger, one item)
+//   links: {from, to, item}  (from = output side, to = input side)
+// evaluateDesign() works out what actually flows, live, in the browser.
+
+const DW = 290; // design machine width
+const HUB_W = 130;
+const PORT_ROW = 20;
+const PORT_TOP = 52;
+let _idSeq = 0;
+const newId = (p) => `${p}${Date.now().toString(36)}${(_idSeq++).toString(36)}`;
+const scaleOf = (n) => (n.count || 1) * (n.clock ?? 100) / 100;
+const POWER_EXP = 1.321928;
+// Rounded clocks make "40 of 40.0002" common; ignore gaps below 0.1 % (min 0.01/min).
+const isShort = (got, want) => got < want - Math.max(0.01, want * 0.001);
+const isSpare = (spare, make) => spare > Math.max(0.05, make * 0.005);
+
+/** Ports of a design node: inputs on the left, outputs on the right. */
+function designPorts(n, ctx, graph) {
+  if (n.type === "machine") {
+    const r = ctx.recipes[n.recipe];
+    const ins = Object.keys(r?.inputs || {}), outs = Object.keys(r?.outputs || {});
+    return {
+      ins: ins.map((item, i) => ({ item, y: PORT_TOP + PORT_ROW * i + 10 })),
+      outs: outs.map((item, i) => ({ item, y: PORT_TOP + PORT_ROW * i + 10 })),
+    };
+  }
+  if (n.type === "supply") return { ins: [], outs: [{ item: n.item, y: 40 }] };
+  if (n.type === "output") return { ins: [{ item: n.item, y: 40 }], outs: [] };
+  const item = hubItem(n, graph);
+  return { ins: [{ item, y: 30, any: true }], outs: [{ item, y: 30, any: true }] };
+}
+function hubItem(n, graph) {
+  if (n.item) return n.item;
+  const l = graph.links.find((x) => x.from === n.id || x.to === n.id);
+  return l ? l.item : null;
+}
+function designSize(n, ctx, graph) {
+  if (n.type === "hub") return [HUB_W, 60];
+  if (n.type !== "machine") return [NODE_W, 80];
+  const p = designPorts(n, ctx, graph);
+  return [DW, PORT_TOP + PORT_ROW * Math.max(1, p.ins.length, p.outs.length) + 30];
+}
+
+/** Can `from` send `item` to `to`? */
+function canLink(graph, ctx, fromId, toId, item) {
+  if (fromId === toId || !item) return false;
+  const byId = Object.fromEntries(graph.nodes.map((n) => [n.id, n]));
+  const a = byId[fromId], b = byId[toId];
+  if (!a || !b) return false;
+  const outs = designPorts(a, ctx, graph).outs, ins = designPorts(b, ctx, graph).ins;
+  const okOut = outs.some((p) => p.item === item || (p.any && !p.item) || (a.type === "supply" && !a.item));
+  const okIn = ins.some((p) => p.item === item || (p.any && !p.item) || (b.type === "output" && !b.item));
+  if (!okOut || !okIn) return false;
+  return !graph.links.some((l) => l.from === fromId && l.to === toId && l.item === item);
+}
+
+/** Live evaluation: machine efficiency, link flows, shortages and overflows. */
+function evaluateDesign(graph, ctx) {
+  const byId = Object.fromEntries(graph.nodes.map((n) => [n.id, n]));
+  const links = graph.links.filter((l) => byId[l.from] && byId[l.to]);
+  const outL = {}, inL = {};
+  for (const l of links) { (outL[l.from] ||= []).push(l); (inL[l.to] ||= []).push(l); }
+  const recipe = (n) => ctx.recipes[n.recipe];
+  const need = (n, item) => {
+    if (n.type === "machine") return { fin: (recipe(n)?.inputs?.[item] || 0) * scaleOf(n), inf: false };
+    if (n.type === "output") return n.want > 0 ? { fin: n.want, inf: false } : { fin: 0, inf: true };
+    return { fin: 0, inf: false };
+  };
+  // Demand seen through hubs (sum of what's downstream).
+  const demand = (id, item, seen = new Set()) => {
+    const n = byId[id];
+    if (n.type !== "hub") return need(n, item);
+    if (seen.has(id)) return { fin: 0, inf: false };
+    seen.add(id);
+    let fin = 0, inf = false;
+    for (const l of outL[id] || []) {
+      if (l.item !== item) continue;
+      const d = demand(l.to, item, seen);
+      fin += d.fin;
+      inf = inf || d.inf;
+    }
+    return { fin, inf };
+  };
+  const eff = {};
+  for (const n of graph.nodes) if (n.type === "machine") eff[n.id] = 1;
+  let flow = Object.fromEntries(links.map((l) => [l.id, 0]));
+  let overflow = {};
+  const received = (id, item, f) => (inL[id] || []).filter((l) => l.item === item).reduce((s, l) => s + f[l.id], 0);
+  const producerItems = (n) => {
+    if (n.type === "machine") return Object.keys(recipe(n)?.outputs || {});
+    if (n.type === "supply") return n.item ? [n.item] : [];
+    if (n.type === "hub") return [...new Set((outL[n.id] || []).map((l) => l.item))];
+    return [];
+  };
+  const supplyOf = (n, item, f) => {
+    if (n.type === "machine") return (recipe(n)?.outputs?.[item] || 0) * scaleOf(n) * eff[n.id];
+    if (n.type === "supply") return n.item === item ? Number(n.rate) || 0 : 0;
+    if (n.type === "hub") return received(n.id, item, f);
+    return 0;
+  };
+  for (let iter = 0; iter < 200; iter++) {
+    const nf = {}, of = {};
+    for (const n of graph.nodes) {
+      for (const item of producerItems(n)) {
+        const ls = (outL[n.id] || []).filter((l) => l.item === item);
+        const S = supplyOf(n, item, flow);
+        const ds = ls.map((l) => demand(l.to, item));
+        const finTotal = ds.reduce((s, d) => s + d.fin, 0);
+        const infN = ds.filter((d) => d.inf).length;
+        let rest = S;
+        if (S <= finTotal + 1e-9) {
+          ls.forEach((l, i) => (nf[l.id] = finTotal > 0 ? (S * ds[i].fin) / finTotal : 0));
+          rest = finTotal > 0 ? 0 : S;
+        } else {
+          ls.forEach((l, i) => (nf[l.id] = ds[i].fin));
+          rest = S - finTotal;
+        }
+        if (rest > 1e-9) {
+          if (infN) ls.forEach((l, i) => { if (ds[i].inf) nf[l.id] += rest / infN; });
+          else of[`${n.id}|${item}`] = rest;
+        }
+      }
+    }
+    let delta = 0;
+    for (const n of graph.nodes) {
+      if (n.type !== "machine") continue;
+      const r = recipe(n);
+      let e = 1;
+      for (const [item, per] of Object.entries(r?.inputs || {})) {
+        const want = per * scaleOf(n);
+        if (want > 0) e = Math.min(e, received(n.id, item, nf) / want);
+      }
+      e = Math.max(0, Math.min(1, e));
+      delta = Math.max(delta, Math.abs(e - eff[n.id]));
+      eff[n.id] = e;
+    }
+    for (const l of links) delta = Math.max(delta, Math.abs((nf[l.id] || 0) - flow[l.id]));
+    flow = Object.fromEntries(links.map((l) => [l.id, nf[l.id] || 0]));
+    overflow = of;
+    if (delta < 1e-7) break;
+  }
+
+  // Report.
+  const tier = (item, rate) => {
+    const list = ctx.items[item]?.fluid ? ctx.pipes : ctx.belts;
+    if (!list?.length) return { carrier: null, lanes: null };
+    const fit = list.find((t) => t[2] + 1e-6 >= rate);
+    const best = list[list.length - 1];
+    return fit ? { carrier: fit[1], lanes: 1, cap: fit[2] } : { carrier: best[1], lanes: Math.ceil(rate / best[2] - 1e-6), cap: best[2] };
+  };
+  const nodes = {}, problems = [];
+  let power = 0;
+  const buildings = {}, cost = {}, supplies = [], outputs = [];
+  const name = (i) => ctx.items[i]?.name || i || "nothing yet";
+  for (const n of graph.nodes) {
+    if (n.type === "machine") {
+      const r = recipe(n);
+      if (!r) { problems.push({ node: n.id, level: "err", text: "Recipe not found in this save's game data" }); nodes[n.id] = { eff: 0, ins: [], outs: [] }; continue; }
+      const sc = scaleOf(n), e = eff[n.id];
+      const ins = Object.entries(r.inputs).map(([item, per]) => {
+        const want = per * sc, got = received(n.id, item, flow);
+        return { item, name: name(item), want, got, linked: (inL[n.id] || []).some((l) => l.item === item) };
+      });
+      const outs = Object.entries(r.outputs).map(([item, per]) => {
+        const make = per * sc * e;
+        const used = (outL[n.id] || []).filter((l) => l.item === item).reduce((s, l) => s + flow[l.id], 0);
+        return { item, name: name(item), make, used, spare: Math.max(0, make - used), linked: (outL[n.id] || []).some((l) => l.item === item) };
+      });
+      const mw = (r.power || 0) * (n.count || 1) * Math.pow((n.clock ?? 100) / 100, POWER_EXP);
+      power += mw;
+      buildings[r.building] = (buildings[r.building] || 0) + (n.count || 1);
+      for (const [item, amt] of Object.entries(ctx.buildings?.[r.building]?.cost || {})) cost[item] = (cost[item] || 0) + amt * (n.count || 1);
+      nodes[n.id] = { eff: e, ins, outs, power: mw, recipe: r };
+      for (const i of ins) {
+        if (!i.linked) problems.push({ node: n.id, level: "err", text: `${i.name} isn't connected (needs ${fmt(i.want, 2)}/min)` });
+        else if (isShort(i.got, i.want)) problems.push({ node: n.id, level: "warn", text: `Short of ${i.name}: ${fmt(i.got, 2)} of ${fmt(i.want, 2)}/min` });
+      }
+      for (const o of outs) {
+        if (!o.linked && o.make > 1e-6) problems.push({ node: n.id, level: "warn", text: `${o.name} output isn't connected; the machine will back up` });
+        else if (isSpare(o.spare, o.make)) problems.push({ node: n.id, level: "warn", text: `${fmt(o.spare, 2)}/min of ${o.name} has nowhere to go` });
+      }
+      if (!r.unlocked) problems.push({ node: n.id, level: "info", text: `${r.name} isn't unlocked yet` });
+    } else if (n.type === "supply") {
+      const used = (outL[n.id] || []).reduce((s, l) => s + flow[l.id], 0);
+      nodes[n.id] = { used, spare: Math.max(0, (Number(n.rate) || 0) - used) };
+      supplies.push({ id: n.id, item: n.item, name: name(n.item), rate: Number(n.rate) || 0, used, label: n.label || "" });
+      if (!n.item) problems.push({ node: n.id, level: "err", text: "Supply has no item" });
+      else if (!(outL[n.id] || []).length) problems.push({ node: n.id, level: "warn", text: `${name(n.item)} supply isn't connected` });
+    } else if (n.type === "output") {
+      const got = n.item ? received(n.id, n.item, flow) : 0;
+      nodes[n.id] = { got };
+      outputs.push({ id: n.id, item: n.item, name: name(n.item), got, want: n.want || null });
+      if (n.want > 0 && isShort(got, n.want)) problems.push({ node: n.id, level: "warn", text: `${name(n.item)} output gets ${fmt(got, 2)} of ${fmt(n.want, 2)}/min` });
+    } else {
+      const item = hubItem(n, graph);
+      const through = item ? received(n.id, item, flow) : 0;
+      nodes[n.id] = { item, through };
+      if (new Set(links.filter((l) => l.from === n.id || l.to === n.id).map((l) => l.item)).size > 1) problems.push({ node: n.id, level: "err", text: "A splitter/merger can only carry one item" });
+    }
+  }
+  const linkInfo = {};
+  for (const l of links) {
+    const t = tier(l.item, flow[l.id]);
+    linkInfo[l.id] = { flow: flow[l.id], ...t };
+    if (t.lanes > 1) problems.push({ link: l.id, level: "warn", text: `${name(l.item)} link carries ${fmt(flow[l.id], 1)}/min: needs ${t.lanes}× ${t.carrier}` });
+  }
+  return {
+    nodes, links: linkInfo, problems, overflow,
+    totals: {
+      power, machines: Object.values(buildings).reduce((s, v) => s + v, 0),
+      buildings: Object.entries(buildings).map(([b, c]) => ({ building: b, name: ctx.buildings?.[b]?.name || b, count: c })).sort((a, b) => b.count - a.count),
+      cost: Object.entries(cost).map(([i, a]) => ({ item: i, name: name(i), amount: a })).sort((a, b) => b.amount - a.amount),
+    },
+    supplies, outputs,
+  };
+}
+
+/** Turn a solver result into a design graph (positions from the current layout). */
+function designFromResult(r, pos, items) {
+  const nodes = [], links = [], idMap = {};
+  // Design boxes are wider and taller than solve boxes: spread the layout out.
+  const sx = (DW + COL_GAP) / (NODE_W + COL_GAP), sy = 1.35;
+  const at = (id) => { const p = pos?.[id] || [0, 0]; return [Math.round(p[0] * sx), Math.round(p[1] * sy)]; };
+  for (const s of r.steps) {
+    const id = newId("m");
+    idMap[s.id] = id;
+    nodes.push({ id, type: "machine", recipe: s.recipe, count: s.count, clock: Math.round(s.machines / s.count * 1e6) / 1e4, x: at(s.id)[0], y: at(s.id)[1] });
+  }
+  const sup = (x, label) => {
+    const id = newId("s");
+    idMap[x.id] = id;
+    nodes.push({ id, type: "supply", item: x.item, rate: Math.ceil(x.rate * 100 + 1e-9) / 100, label, x: at(x.id)[0], y: at(x.id)[1] });
+  };
+  r.raw.forEach((x) => sup(x, "Raw"));
+  r.surplus.forEach((x) => sup(x, "From surplus"));
+  r.missing.forEach((x) => sup(x, "Missing"));
+  for (const x of [...r.outputs, ...r.byproducts]) {
+    const id = newId("o");
+    idMap[x.id] = id;
+    nodes.push({ id, type: "output", item: x.item, want: x.requested ?? null, label: x.id.startsWith("byproduct:") ? "Byproduct" : "", x: at(x.id)[0], y: at(x.id)[1] });
+  }
+  const seen = new Set();
+  for (const e of r.edges) {
+    const a = idMap[e.from], b = idMap[e.to], k = `${a}|${b}|${e.item}`;
+    if (a && b && !seen.has(k)) { seen.add(k); links.push({ id: newId("l"), from: a, to: b, item: e.item }); }
+  }
+  return { nodes, links };
+}
+
+function designNodeBody(n, ev, ctx, graph, selected) {
+  const [W, H] = designSize(n, ctx, graph);
+  const info = ev.nodes[n.id] || {};
+  const bad = ev.problems.some((p) => p.node === n.id && p.level === "err");
+  const warn = ev.problems.some((p) => p.node === n.id && p.level === "warn");
+  const stroke = selected ? PC.orange : bad ? "#ff6b5e" : warn ? "#8a6a26" : PC.line;
+  const name = (i) => ctx.items[i]?.name || i || "—";
+  const clip = (s, m) => (String(s).length > m ? String(s).slice(0, m - 1) + "…" : String(s));
+  let b = "";
+  const port = (x, y, item, dir, ok) =>
+    `<circle class="port" data-node="${pesc(n.id)}" data-item="${pesc(item || "")}" data-dir="${dir}" cx="${x}" cy="${y}" r="7" fill="${ok ? "#1d2633" : "#3a1416"}" stroke="${ok ? PC.dim : PC.red}" stroke-width="1.5"/>`;
+  if (n.type === "machine") {
+    const r = ctx.recipes[n.recipe];
+    const e = info.eff ?? 1;
+    const effC = e >= 0.995 ? PC.green : e > 0.5 ? PC.amber : PC.red;
+    b += `<rect class="box" width="${W}" height="${H}" rx="8" fill="${PC.panel}" stroke="${stroke}" stroke-width="${selected || bad ? 2 : 1}"/>
+      <rect width="6" height="${H}" rx="3" fill="${r?.unlocked === false ? PC.amber : PC.orange}"/>
+      <text x="16" y="20" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="${PC.orange}">${n.count || 1} × ${pesc(clip((r?.building_name || "?").toUpperCase(), 14))} @ ${fmt(n.clock ?? 100, 2)}%</text>
+      <text x="16" y="40" font-size="14" font-weight="600" fill="${PC.text}">${pesc(clip((r?.name || n.recipe).replace(/^Alternate: /, ""), 26))}</text>`;
+    (info.ins || []).forEach((p, i) => {
+      const y = PORT_TOP + PORT_ROW * i + 10, short = isShort(p.got, p.want);
+      b += `<text x="14" y="${y + 4}" font-family="JetBrains Mono, monospace" font-size="10" fill="${short ? (p.linked ? PC.amber : "#ff8a80") : PC.text2}">${pesc(clip(name(p.item), 13))} ${fmt(p.got, 1)}/${fmt(p.want, 1)}</text>`;
+      b += port(0, y, p.item, "in", p.linked);
+    });
+    (info.outs || []).forEach((p, i) => {
+      const y = PORT_TOP + PORT_ROW * i + 10;
+      b += `<text x="${W - 14}" y="${y + 4}" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="${isSpare(p.spare, p.make) || !p.linked ? PC.amber : PC.text2}">${pesc(clip(name(p.item), 13))} ${fmt(p.make, 1)}</text>`;
+      b += port(W, y, p.item, "out", p.linked || p.make < 1e-6);
+    });
+    b += `<text x="16" y="${H - 9}" font-family="JetBrains Mono, monospace" font-size="11" fill="${effC}">running ${fmt(e * 100, 1)}%</text>
+      <text x="${W - 12}" y="${H - 9}" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="${PC.dim}">${fmt(info.power, 1)} MW</text>`;
+  } else if (n.type === "supply" || n.type === "output") {
+    const isS = n.type === "supply";
+    const tag = isS ? (n.label || "SUPPLY").toUpperCase() : (n.label || "OUTPUT").toUpperCase();
+    const fill = isS ? "#0f1a1e" : "#221a0e", st = selected ? PC.orange : bad ? "#ff6b5e" : isS ? "#2a5662" : PC.orange;
+    const line = isS ? `${fmt(info.used, 2)} of ${fmt(n.rate, 2)}/min used` : `${fmt(info.got, 2)}${n.want ? ` of ${fmt(n.want, 2)}` : ""}/min`;
+    b += `<rect class="box" width="${W}" height="${H}" rx="8" fill="${fill}" stroke="${st}" stroke-width="${selected ? 2 : 1}"/>
+      <text x="14" y="20" font-size="10" font-weight="700" letter-spacing="1.6" fill="${isS ? PC.cyan : PC.orange}">${pesc(clip(tag, 22))}</text>
+      <text x="14" y="42" font-size="14" font-weight="600" fill="${PC.text}">${pesc(clip(name(n.item), 22))}</text>
+      <text x="14" y="62" font-family="JetBrains Mono, monospace" font-size="11" fill="${PC.text2}">${pesc(line)}</text>`;
+    b += isS ? port(W, 40, n.item, "out", true) : port(0, 40, n.item, "in", true);
+  } else {
+    const item = info.item;
+    b += `<rect class="box" width="${W}" height="${H}" rx="30" fill="#141922" stroke="${stroke}" stroke-width="${selected || bad ? 2 : 1}"/>
+      <text x="${W / 2}" y="24" text-anchor="middle" font-size="10" font-weight="700" letter-spacing="1.4" fill="${PC.dim}">SPLIT / MERGE</text>
+      <text x="${W / 2}" y="42" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="${PC.text2}">${pesc(clip(item ? `${name(item)} ${fmt(info.through, 1)}` : "no item yet", 18))}</text>`;
+    b += port(0, 30, item, "in", true) + port(W, 30, item, "out", true);
+  }
+  return b;
+}
+
+const DesignMixin = {
+  _dctx() {
+    const m = this._model || {};
+    return { recipes: this._recipeByCls || {}, items: this._items || {}, belts: m.belts || [], pipes: m.pipes || [], buildings: m.buildings || {} };
+  },
+  _isDesign() { return this._plan.mode === "design"; },
+  _setMode(mode) {
+    if (mode === this._plan.mode) return;
+    if (mode === "design" && !this._plan.graph.nodes.length && this._result?.ok && this._result.steps.length) {
+      this._toDesign();
+      return;
+    }
+    this._plan.mode = mode;
+    this._sel = null;
+    this.$("detail").hidden = true;
+    this.$("cmenu").hidden = true;
+    this._markDirty();
+    this._renderPlanPane();
+    this._solveSoon(0, true);
+  },
+  _centerOn(id) {
+    const n = this._plan.graph.nodes.find((x) => x.id === id);
+    const l = !n && this._plan.graph.links.find((x) => x.id === id);
+    const t = n || (l && this._plan.graph.nodes.find((x) => x.id === l.to));
+    if (!t) return;
+    const r = this.$("svg").getBoundingClientRect();
+    this._view.x = r.width / 2 - (t.x + 100) * this._view.k;
+    this._view.y = r.height / 2 - (t.y + 40) * this._view.k;
+    this._applyView();
+  },
+  _evalDesign() {
+    this._ev = evaluateDesign(this._plan.graph, this._dctx());
+    return this._ev;
+  },
+  // Every edit goes through here: undo history, dirty flag, re-evaluate, redraw.
+  _mutate(fn, { pane = false } = {}) {
+    this._undo = this._undo || [];
+    this._undo.push(JSON.stringify(this._plan.graph));
+    if (this._undo.length > 80) this._undo.shift();
+    this._redo = [];
+    fn(this._plan.graph);
+    this._afterGraphChange(pane);
+  },
+  _afterGraphChange(pane) {
+    this._markDirty();
+    this._evalDesign();
+    this._drawDesign();
+    this._renderSummary();
+    if (pane) this._renderPlanPane();
+    else this._renderProblems();
+    if (this._sel) this._selectDesign(this._sel, true);
+  },
+  _undoRedo(dir) {
+    const from = dir < 0 ? (this._undo ||= []) : (this._redo ||= []);
+    const to = dir < 0 ? (this._redo ||= []) : (this._undo ||= []);
+    if (!from.length) return;
+    to.push(JSON.stringify(this._plan.graph));
+    this._plan.graph = JSON.parse(from.pop());
+    this._sel = null;
+    this.$("detail").hidden = true;
+    this._afterGraphChange(true);
+  },
+
+  // ----------------------------------------------------------- left pane
+  _renderDesignPane() {
+    const pane = this.$("planPane");
+    const g = this._plan.graph;
+    const q = (this._paletteQ || "").trim().toLowerCase();
+    const allowAll = this._plan.options.recipes === "all";
+    const recipes = (this._model.recipes || [])
+      .filter((r) => (r.unlocked || allowAll) && (!r.event || r.unlocked))
+      .filter((r) => !q || r.name.toLowerCase().includes(q) || r.building_name.toLowerCase().includes(q) ||
+        Object.keys(r.outputs).some((i) => (this._items[i]?.name || "").toLowerCase().includes(q)))
+      .slice(0, q ? 60 : 40);
+    const row = (kind, arg, title, sub, badge = "") => `<button class="pal" data-pal="${kind}" data-arg="${pesc(arg)}" aria-label="Add ${pesc(title)}">
+        <span class="t">${pesc(title)}</span>${badge}<span class="muted">${pesc(sub)}</span></button>`;
+    pane.innerHTML = `
+      ${this._modeSwitch()}
+      <section class="panel narrow-only" aria-label="Plan name"><h2>PLAN</h2>
+        <input type="text" data-planname value="${pesc(this._plan.name || "")}" placeholder="Plan name" aria-label="Plan name" style="width:100%"></section>
+      <section class="panel" aria-label="Edit">
+        <div class="row" style="flex-wrap:wrap;gap:6px">
+          <button class="btn ghost" data-act="undo" ${this._undo?.length ? "" : "disabled"} aria-label="Undo">↶ UNDO</button>
+          <button class="btn ghost" data-act="redo" ${this._redo?.length ? "" : "disabled"} aria-label="Redo">↷ REDO</button>
+          <button class="btn" data-act="fill" ${this._ev?.problems?.some((p) => /isn't connected \(needs|Short of/.test(p.text)) ? "" : "disabled"}>FILL SHORTAGES</button>
+          <button class="btn ghost" data-act="clear-design" ${g.nodes.length ? "" : "disabled"}>CLEAR</button>
+        </div>
+        <div class="muted" style="margin-top:8px">Drag from a port to connect; drop on empty space for matching buildings. Select and press Delete to remove.</div>
+      </section>
+      <section class="panel" aria-label="Add buildings"><h2>ADD</h2>
+        <input id="palQ" type="text" placeholder="Search recipes, items, buildings…" aria-label="Search recipes" value="${pesc(this._paletteQ || "")}" style="width:100%;margin-bottom:8px">
+        <div class="palist">
+          ${row("supply", "", "Supply", "Raw resource or incoming items")}
+          ${row("output", "", "Output", "Where the finished items go")}
+          ${row("hub", "", "Splitter / merger", "Split or join one item")}
+          ${recipes.map((r) => row("machine", r.cls, r.name.replace(/^Alternate: /, ""), r.building_name,
+            `${r.alternate ? `<span class="badge alt">ALT</span>` : ""}${!r.unlocked ? `<span class="badge lock">LOCKED</span>` : ""}`)).join("")}
+        </div>
+        <div class="muted" style="margin-top:8px">Drag onto the canvas, or tap to add in the middle.</div>
+      </section>
+      <section class="panel" aria-label="Problems" id="problems"></section>`;
+    this._renderProblems();
+  },
+  _modeSwitch() {
+    const d = this._isDesign();
+    return `<section class="panel" aria-label="Mode"><div class="opt" style="min-height:0"><span>Mode</span>
+      <span class="seg" role="group" aria-label="Planner mode">
+        <button data-act="mode" data-arg="solve" aria-pressed="${!d}">SOLVE</button>
+        <button data-act="mode" data-arg="design" aria-pressed="${d}">DESIGN</button></span></div>
+      <div class="muted" style="margin-top:6px">${d ? "You place the buildings and connections; the maths updates as you go." : "Say what to make; the planner picks buildings and connections."}</div></section>`;
+  },
+  _renderProblems() {
+    const box = this.shadowRoot.getElementById("problems");
+    if (!box) return;
+    const ps = this._ev?.problems || [];
+    const col = { err: "#ff8a80", warn: PC.amber, info: PC.dim };
+    box.innerHTML = `<h2>${ps.length ? `ISSUES · ${ps.length}` : "ISSUES"}</h2>${ps.length ? `<div class="rlist">${ps.slice(0, 40).map((p, i) =>
+      `<button class="ritem" data-act="goto" data-arg="${i}" style="text-align:left;cursor:pointer"><span class="lamp" style="width:8px;height:8px;border-radius:50%;background:${col[p.level]};flex:none"></span><span class="t" style="white-space:normal">${pesc(p.text)}</span></button>`).join("")}</div>`
+      : `<div class="muted">${this._plan.graph.nodes.length ? "Everything is connected and balanced." : "Add buildings to start."}</div>`}`;
+    const fill = this.shadowRoot.querySelector('[data-act="fill"]');
+    if (fill) fill.disabled = !ps.some((p) => /isn't connected \(needs|Short of/.test(p.text));
+    const u = this.shadowRoot.querySelector('[data-act="undo"]'), r = this.shadowRoot.querySelector('[data-act="redo"]');
+    if (u) u.disabled = !this._undo?.length;
+    if (r) r.disabled = !this._redo?.length;
+  },
+
+  // ----------------------------------------------------------- adding nodes
+  _addNode(kind, arg, at) {
+    const [x, y] = at || this._viewCenter();
+    const node = { id: newId(kind[0]), type: kind, x: Math.round(x), y: Math.round(y) };
+    if (kind === "machine") Object.assign(node, { recipe: arg, count: 1, clock: 100 });
+    if (kind === "supply") Object.assign(node, { item: arg || null, rate: 60, label: "" });
+    if (kind === "output") Object.assign(node, { item: arg || null, want: null, label: "" });
+    if (kind === "hub") node.item = arg || null;
+    this._mutate((g) => g.nodes.push(node));
+    this._selectDesign(node.id);
+    return node;
+  },
+  _viewCenter() {
+    const r = this.$("svg").getBoundingClientRect();
+    return [(r.width / 2 - this._view.x) / this._view.k - 100, (r.height / 2 - this._view.y) / this._view.k - 40];
+  },
+  _worldAt(cx, cy) {
+    const r = this.$("svg").getBoundingClientRect();
+    return [(cx - r.left - this._view.x) / this._view.k, (cy - r.top - this._view.y) / this._view.k];
+  },
+  // Palette rows: tap to add in the middle, or drag onto the canvas.
+  _initPalette() {
+    const root = this.shadowRoot;
+    root.addEventListener("pointerdown", (e) => {
+      const row = e.target.closest?.(".pal");
+      if (!row) return;
+      const start = [e.clientX, e.clientY];
+      let ghost = null;
+      const move = (ev) => {
+        if (!ghost && Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) > 8) {
+          ghost = document.createElement("div");
+          ghost.className = "dragghost";
+          ghost.textContent = row.querySelector(".t").textContent;
+          root.querySelector(".app").appendChild(ghost);
+        }
+        if (ghost) { ghost.style.left = `${ev.clientX + 10}px`; ghost.style.top = `${ev.clientY + 10}px`; }
+      };
+      const up = (ev) => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        if (!ghost) return; // a tap: handled by click
+        ghost.remove();
+        this._palDragged = true;
+        const fr = this.$("flowPane").getBoundingClientRect();
+        if (ev.clientX >= fr.left && ev.clientX <= fr.right && ev.clientY >= fr.top && ev.clientY <= fr.bottom) {
+          const [x, y] = this._worldAt(ev.clientX, ev.clientY);
+          this._addNode(row.dataset.pal, row.dataset.arg, [x - 60, y - 30]);
+        }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    });
+    root.addEventListener("click", (e) => {
+      const row = e.target.closest?.(".pal");
+      if (!row) return;
+      if (this._palDragged) { this._palDragged = false; return; }
+      this._addNode(row.dataset.pal, row.dataset.arg);
+      if (this._tab === "plan" && matchMedia("(max-width:760px)").matches) this._setTab("flow");
+    });
+  },
+
+  // ----------------------------------------------------------- flow canvas
+  _renderDesignFlow(fit) {
+    const g = this._plan.graph;
+    const empty = this.$("emptyFlow");
+    this._evalDesign();
+    if (!g.nodes.length) {
+      empty.hidden = false;
+      empty.innerHTML = `Design mode: drag buildings from the left onto this canvas, then drag between ports to connect them.<br>
+        <span style="font-size:12px">Or switch to SOLVE, plan something, and use EDIT AS DESIGN.</span>`;
+    } else empty.hidden = true;
+    this._laidOut = true;
+    this._drawDesign();
+    if (fit && g.nodes.length) { requestAnimationFrame(() => this._fitDesign()); setTimeout(() => this._fitDesign(), 120); }
+    else this._applyView();
+  },
+  _fitDesign() {
+    const g = this._plan.graph, ctx = this._dctx();
+    if (!g.nodes.length) return;
+    this._nodes = g.nodes.map((n) => { const [w, h] = designSize(n, ctx, g); return { id: n.id, w, h }; });
+    this._pos = Object.fromEntries(g.nodes.map((n) => [n.id, [n.x, n.y]]));
+    this._fit();
+  },
+  _drawDesign() {
+    const g = this._plan.graph, ctx = this._dctx(), ev = this._ev || this._evalDesign();
+    const byId = Object.fromEntries(g.nodes.map((n) => [n.id, n]));
+    const portXY = (n, dir, item) => {
+      const [W] = designSize(n, ctx, g);
+      const ps = designPorts(n, ctx, g)[dir === "out" ? "outs" : "ins"];
+      const p = ps.find((x) => x.item === item) || ps[0];
+      return [n.x + (dir === "out" ? W : 0), n.y + (p ? p.y : 30)];
+    };
+    let edges = "", labels = "";
+    for (const l of g.links) {
+      const a = byId[l.from], b = byId[l.to];
+      if (!a || !b) continue;
+      const [x1, y1] = portXY(a, "out", l.item), [x2, y2] = portXY(b, "in", l.item);
+      const info = ev.links[l.id] || {};
+      const back = x2 < x1 + 20;
+      const dx = Math.max(60, Math.abs(x2 - x1) * 0.5);
+      const d = back
+        ? `M${x1},${y1} C${x1 + 80},${y1} ${x1 + 80},${Math.max(y1, y2) + 90} ${(x1 + x2) / 2},${Math.max(y1, y2) + 90} S${x2 - 80},${y2} ${x2},${y2}`
+        : `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+      const sel = this._sel === l.id;
+      const col = sel ? PC.orange : info.lanes > 1 ? PC.amber : (info.flow || 0) < 1e-6 ? "#5a3236" : ctx.items[l.item]?.fluid ? PC.cyan : "#7f8ba0";
+      const w = Math.max(1.5, Math.min(7, 1.2 + Math.log2(1 + (info.flow || 0) / 15)));
+      edges += `<path d="${d}" fill="none" stroke="${col}" stroke-width="${w.toFixed(1)}" stroke-opacity=".8"/>
+        <path class="linkhit" data-link="${pesc(l.id)}" d="${d}" fill="none" stroke="transparent" stroke-width="16" style="cursor:pointer"/>`;
+      const mx = (x1 + x2) / 2, my = back ? Math.max(y1, y2) + 90 : (y1 + y2) / 2;
+      const nm = ctx.items[l.item]?.name || l.item;
+      const txt = `${nm.length > 14 ? nm.slice(0, 13) + "…" : nm} · ${fmt(info.flow, 2)}`;
+      const tier = info.carrier ? `${info.lanes > 1 ? `${info.lanes}× ` : ""}${tierShort(info.carrier)}` : "";
+      const tw = Math.max(txt.length * 6.4, tier.length * 6) + 16;
+      labels += `<g class="linklabel" data-link="${pesc(l.id)}" transform="translate(${mx - tw / 2},${my - 17})" style="cursor:pointer"><rect width="${tw}" height="${tier ? 34 : 20}" rx="5" fill="#0d1117" stroke="${sel ? PC.orange : PC.line}"/>
+        <text x="${tw / 2}" y="14" text-anchor="middle" font-size="11" fill="${PC.text2}" font-family="JetBrains Mono, monospace">${pesc(txt)}</text>
+        ${tier ? `<text x="${tw / 2}" y="28" text-anchor="middle" font-size="10" fill="${info.lanes > 1 ? PC.amber : PC.dim}" font-family="JetBrains Mono, monospace">${pesc(tier)}</text>` : ""}</g>`;
+    }
+    let nodes = "";
+    for (const n of g.nodes) {
+      nodes += `<g class="node" data-id="${pesc(n.id)}" transform="translate(${n.x},${n.y})" tabindex="0" role="button" aria-label="${pesc(this._designAria(n))}">${designNodeBody(n, ev, ctx, g, this._sel === n.id)}</g>`;
+    }
+    this.$("vp").innerHTML = `<g>${edges}</g><g>${labels}</g><g>${nodes}</g><path id="wire" fill="none" stroke="${PC.orange}" stroke-width="2" stroke-dasharray="6 4" d=""/>`;
+  },
+  _designAria(n) {
+    const ctx = this._dctx(), name = (i) => ctx.items[i]?.name || i || "nothing";
+    if (n.type === "machine") { const r = ctx.recipes[n.recipe]; return `${n.count} ${r?.building_name || ""} making ${r?.name || n.recipe} at ${n.clock} percent`; }
+    if (n.type === "supply") return `Supply of ${name(n.item)}, ${n.rate} per minute`;
+    if (n.type === "output") return `Output for ${name(n.item)}`;
+    return "Splitter or merger";
+  },
+
+  // Dragging a wire from a port.
+  _startWire(port, e) {
+    const node = this._plan.graph.nodes.find((n) => n.id === port.dataset.node);
+    if (!node) return null;
+    const dir = port.dataset.dir, item = port.dataset.item || null;
+    const ctx = this._dctx(), [W] = designSize(node, ctx, this._plan.graph);
+    const ps = designPorts(node, ctx, this._plan.graph)[dir === "out" ? "outs" : "ins"];
+    const p = ps.find((x) => (x.item || null) === item) || ps[0];
+    return { kind: "wire", node, dir, item, x0: node.x + (dir === "out" ? W : 0), y0: node.y + (p ? p.y : 30) };
+  },
+  _moveWire(w, cx, cy) {
+    const [x, y] = this._worldAt(cx, cy);
+    const dx = Math.max(50, Math.abs(x - w.x0) * 0.5) * (w.dir === "out" ? 1 : -1);
+    this.shadowRoot.getElementById("wire")?.setAttribute("d", `M${w.x0},${w.y0} C${w.x0 + dx},${w.y0} ${x - dx},${y} ${x},${y}`);
+  },
+  _endWire(w, cx, cy) {
+    this.shadowRoot.getElementById("wire")?.setAttribute("d", "");
+    const el = this.shadowRoot.elementFromPoint(cx, cy);
+    const g = this._plan.graph, ctx = this._dctx();
+    const targetPort = el?.closest?.(".port");
+    const targetNode = el?.closest?.(".node");
+    const link = (fromId, toId, item) => {
+      if (!item) { this._toast("Connect something with an item first."); return false; }
+      if (!canLink(g, ctx, fromId, toId, item)) { this._toast("Those can't be connected."); return false; }
+      this._mutate((gr) => {
+        gr.links.push({ id: newId("l"), from: fromId, to: toId, item });
+        for (const id of [fromId, toId]) {
+          const n = gr.nodes.find((x) => x.id === id);
+          if ((n.type === "supply" || n.type === "output" || n.type === "hub") && !n.item) n.item = item;
+        }
+      });
+      return true;
+    };
+    if (targetNode && targetNode.dataset.id !== w.node.id) {
+      const other = g.nodes.find((n) => n.id === targetNode.dataset.id);
+      const want = w.dir === "out" ? "in" : "out";
+      const tItem = targetPort && targetPort.dataset.dir === want ? targetPort.dataset.item || null : null;
+      const item = w.item || tItem || (() => {
+        // Pick the first item both sides share.
+        const mine = designPorts(w.node, ctx, g)[w.dir === "out" ? "outs" : "ins"].map((p) => p.item).filter(Boolean);
+        const theirs = designPorts(other, ctx, g)[want === "out" ? "outs" : "ins"].map((p) => p.item).filter(Boolean);
+        return mine.find((i) => theirs.includes(i)) || theirs[0] || mine[0] || null;
+      })();
+      if (w.dir === "out") link(w.node.id, other.id, item); else link(other.id, w.node.id, item);
+      return;
+    }
+    if (!targetNode && !el?.closest?.(".tools, .detail, .cmenu")) this._connectMenu(w, cx, cy);
+  },
+  // Dropped a wire on empty canvas: offer things that fit.
+  _connectMenu(w, cx, cy) {
+    const item = w.item;
+    if (!item) return;
+    const name = this._items[item]?.name || item;
+    const allowAll = this._plan.options.recipes === "all";
+    const ok = (r) => r.unlocked || allowAll;
+    const list = (this._model.recipes || []).filter((r) => ok(r) && (w.dir === "out" ? item in r.inputs : item in r.outputs))
+      .sort((a, b) => Number(b.unlocked) - Number(a.unlocked) || a.name.localeCompare(b.name)).slice(0, 14);
+    const special = w.dir === "out"
+      ? [["output", `Output: ${name}`], ["hub", "Splitter"]]
+      : [["supply", `Supply: ${name}`], ["hub", "Merger"]];
+    const menu = this.$("cmenu");
+    const fr = this.$("flowPane").getBoundingClientRect();
+    menu.style.left = `${Math.min(cx - fr.left, fr.width - 270)}px`;
+    menu.style.top = `${Math.min(cy - fr.top, fr.height - 320)}px`;
+    menu.innerHTML = `<div class="lbl" style="padding:6px 8px">${w.dir === "out" ? "SEND" : "GET"} ${pesc(name.toUpperCase())} ${w.dir === "out" ? "TO" : "FROM"}</div>
+      ${special.map(([k, t]) => `<button class="mi" data-act="menu-pick" data-arg="${k}|">${pesc(t)}</button>`).join("")}
+      ${list.map((r) => `<button class="mi" data-act="menu-pick" data-arg="machine|${pesc(r.cls)}">${pesc(r.name.replace(/^Alternate: /, ""))}<span class="muted"> · ${pesc(r.building_name)}${r.unlocked ? "" : " · locked"}</span></button>`).join("")}
+      ${list.length ? "" : `<div class="muted" style="padding:6px 8px">No ${allowAll ? "" : "unlocked "}recipe ${w.dir === "out" ? "uses" : "makes"} ${pesc(name)}.</div>`}
+      <button class="mi" data-act="menu-close" style="color:${PC.dim}">Cancel</button>`;
+    menu.hidden = false;
+    const [x, y] = this._worldAt(cx, cy);
+    this._pendingWire = { ...w, at: [x, w.dir === "out" ? y - 30 : y - 30] };
+    menu.querySelector(".mi")?.focus();
+  },
+  _menuPick(arg) {
+    const w = this._pendingWire;
+    this.$("cmenu").hidden = true;
+    if (!w) return;
+    const [kind, cls] = arg.split("|");
+    const g = this._plan.graph, ctx = this._dctx();
+    const node = { id: newId(kind[0]), type: kind, x: Math.round(w.dir === "out" ? w.at[0] + 20 : w.at[0] - 260), y: Math.round(w.at[1]) };
+    if (kind === "machine") {
+      const r = ctx.recipes[cls];
+      // Size it to match: enough machines (at 100 %, or less) for this item.
+      const port = w.dir === "out"
+        ? (this._ev.nodes[w.node.id]?.outs || []).find((p) => p.item === w.item)
+        : (this._ev.nodes[w.node.id]?.ins || []).find((p) => p.item === w.item);
+      const rate = w.dir === "out" ? (port?.spare ?? port?.make ?? 0) : Math.max(0, (port?.want ?? 0) - (port?.got ?? 0)) || (port?.want ?? 0);
+      const per = w.dir === "out" ? r.inputs[w.item] : r.outputs[w.item];
+      const exact = per > 0 && rate > 0 ? rate / per : 1;
+      const count = Math.max(1, Math.ceil(exact - 1e-6));
+      Object.assign(node, { recipe: cls, count, clock: Math.round(Math.min(250, Math.max(1, (exact / count) * 100)) * 1000) / 1000 });
+    } else if (kind === "supply") {
+      const port = (this._ev.nodes[w.node.id]?.ins || []).find((p) => p.item === w.item);
+      Object.assign(node, { item: w.item, rate: Math.round(Math.max(0, (port?.want ?? 60) - (port?.got ?? 0)) * 1000) / 1000 || 60, label: "" });
+    } else if (kind === "output") Object.assign(node, { item: w.item, want: null, label: "" });
+    else node.item = w.item;
+    this._mutate((gr) => {
+      gr.nodes.push(node);
+      gr.links.push(w.dir === "out" ? { id: newId("l"), from: w.node.id, to: node.id, item: w.item } : { id: newId("l"), from: node.id, to: w.node.id, item: w.item });
+    });
+    this._pendingWire = null;
+    void g;
+  },
+
+  // ----------------------------------------------------------- details
+  _selectDesign(id, keep) {
+    this._sel = id;
+    const box = this.$("detail");
+    const g = this._plan.graph, ctx = this._dctx(), ev = this._ev || this._evalDesign();
+    const n = g.nodes.find((x) => x.id === id), l = !n && g.links.find((x) => x.id === id);
+    if (!keep) this._drawDesign();
+    if (!n && !l) { box.hidden = true; return; }
+    const name = (i) => ctx.items[i]?.name || i || "—";
+    const head = (t) => `<div class="row sp"><strong style="font-size:15px">${pesc(t)}</strong><button class="btn ghost icon" data-act="close-detail" aria-label="Close details">✕</button></div>`;
+    let html = "";
+    if (l) {
+      const info = ev.links[l.id] || {};
+      html = head(`${name(l.item)} link`) + `<div class="muted">${fmt(info.flow, 3)}/min${info.carrier ? ` · ${info.lanes > 1 ? `${info.lanes}× ` : ""}${pesc(info.carrier)}` : ""}</div>
+        <div style="margin-top:10px"><button class="btn ghost" data-act="del-sel">DELETE LINK</button></div>`;
+    } else if (n.type === "machine") {
+      const r = ctx.recipes[n.recipe], info = ev.nodes[n.id] || {};
+      const alts = (this._model.recipes || []).filter((x) => x.building === r?.building && (x.unlocked || this._plan.options.recipes === "all" || x.cls === n.recipe));
+      const rows = (list, f) => list.map(f).join("");
+      html = head(r ? r.name : n.recipe) + `
+        <label class="fld"><span class="lbl">RECIPE</span><select data-field="recipe">${alts.map((x) => `<option value="${pesc(x.cls)}" ${x.cls === n.recipe ? "selected" : ""}>${pesc(x.name)}${x.unlocked ? "" : " (locked)"}</option>`).join("")}</select></label>
+        <div class="row" style="gap:8px;margin-top:8px">
+          <label class="fld" style="flex:1"><span class="lbl">MACHINES</span><input type="number" min="1" max="1000" step="1" data-field="count" value="${n.count || 1}"></label>
+          <label class="fld" style="flex:1"><span class="lbl">CLOCK %</span><input type="number" min="1" max="250" step="any" data-field="clock" value="${fmt(n.clock ?? 100, 3)}"></label>
+        </div>
+        <div class="muted" style="margin-top:6px">Running at ${fmt((info.eff ?? 1) * 100, 1)}% of that · ${fmt(info.power, 1)} MW</div>
+        <table>${rows(info.ins || [], (p) => `<tr><td>${pesc(p.name)}</td><td class="r" style="color:${isShort(p.got, p.want) ? PC.amber : PC.text2}">${fmt(p.got, 2)} / ${fmt(p.want, 2)}</td></tr>`)}
+        ${rows(info.outs || [], (p) => `<tr><td>→ ${pesc(p.name)}</td><td class="r">${fmt(p.make, 2)}${isSpare(p.spare, p.make) ? ` <span style="color:${PC.amber}">(${fmt(p.spare, 2)} spare)</span>` : ""}</td></tr>`)}</table>
+        <div class="row" style="gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn ghost" data-act="balance">MATCH INPUTS</button><button class="btn ghost" data-act="dup">DUPLICATE</button><button class="btn ghost" data-act="del-sel">DELETE</button></div>`;
+    } else if (n.type === "supply" || n.type === "output") {
+      const s = n.type === "supply", info = ev.nodes[n.id] || {};
+      const res = s && n.item ? this._model.resources?.[n.item] : null;
+      html = head(s ? "Supply" : "Output") + `
+        <label class="fld"><span class="lbl">ITEM</span><input type="text" list="allitems" data-field="item" value="${pesc(n.item ? name(n.item) : "")}" placeholder="Item name"></label>
+        <div class="row" style="gap:8px;margin-top:8px">
+          <label class="fld" style="flex:1"><span class="lbl">${s ? "PER MINUTE" : "WANT PER MINUTE"}</span><input type="number" min="0" step="any" data-field="${s ? "rate" : "want"}" value="${s ? fmt(n.rate, 3) : n.want ?? ""}" placeholder="${s ? "" : "any"}"></label>
+          <label class="fld" style="flex:1"><span class="lbl">LABEL</span><input type="text" data-field="label" value="${pesc(n.label || "")}" placeholder="${s ? "e.g. Raw" : "e.g. To storage"}"></label>
+        </div>
+        <div class="muted" style="margin-top:6px">${s ? `${fmt(info.used, 2)}/min used` : `${fmt(info.got, 2)}/min arriving`}</div>
+        ${res ? `<div class="muted" style="margin-top:4px">Free nodes: ${res.free_by_purity?.Pure ?? 0} pure · ${res.free_by_purity?.Normal ?? 0} normal · ${res.free_by_purity?.Impure ?? 0} impure</div>` : ""}
+        <div class="row" style="gap:6px;margin-top:10px"><button class="btn ghost" data-act="dup">DUPLICATE</button><button class="btn ghost" data-act="del-sel">DELETE</button></div>`;
+    } else {
+      html = head("Splitter / merger") + `<div class="muted">${fmt(ev.nodes[n.id]?.through, 2)}/min of ${pesc(name(ev.nodes[n.id]?.item))}. It splits what comes in by what's downstream needs.</div>
+        <div style="margin-top:10px"><button class="btn ghost" data-act="del-sel">DELETE</button></div>`;
+    }
+    box.innerHTML = html;
+    box.hidden = false;
+  },
+  _designField(field, value) {
+    const n = this._plan.graph.nodes.find((x) => x.id === this._sel);
+    if (!n) return;
+    this._mutate(() => {
+      if (field === "count") n.count = Math.max(1, Math.min(1000, Math.round(Number(value) || 1)));
+      else if (field === "clock") n.clock = Math.max(1, Math.min(250, Number(value) || 100));
+      else if (field === "rate") n.rate = Math.max(0, Number(value) || 0);
+      else if (field === "want") n.want = value === "" ? null : Math.max(0, Number(value) || 0);
+      else if (field === "label") n.label = String(value).slice(0, 80);
+      else if (field === "recipe") {
+        n.recipe = value;
+        const r = this._recipeByCls[value];
+        // Drop links for items the new recipe doesn't use.
+        this._plan.graph.links = this._plan.graph.links.filter((l) =>
+          (l.from !== n.id || l.item in (r?.outputs || {})) && (l.to !== n.id || l.item in (r?.inputs || {})));
+      } else if (field === "item") {
+        const cls = this._allNameToCls?.[String(value).trim().toLowerCase()];
+        if (!cls) { this._toast(`No item called “${value}”.`); return; }
+        n.item = cls;
+        this._plan.graph.links = this._plan.graph.links.filter((l) => (l.from !== n.id && l.to !== n.id) || l.item === cls);
+      }
+    });
+  },
+  _deleteSel() {
+    const id = this._sel;
+    if (!id) return;
+    this._mutate((g) => {
+      g.nodes = g.nodes.filter((n) => n.id !== id);
+      g.links = g.links.filter((l) => l.id !== id && l.from !== id && l.to !== id);
+    });
+    this._sel = null;
+    this.$("detail").hidden = true;
+  },
+  _duplicate() {
+    const n = this._plan.graph.nodes.find((x) => x.id === this._sel);
+    if (!n) return;
+    const copy = { ...JSON.parse(JSON.stringify(n)), id: newId(n.type[0]), x: n.x + 30, y: n.y + 30 };
+    this._mutate((g) => g.nodes.push(copy));
+    this._selectDesign(copy.id);
+  },
+  // Set count/clock so the machine uses exactly what reaches it.
+  _balance() {
+    const n = this._plan.graph.nodes.find((x) => x.id === this._sel);
+    const info = this._ev?.nodes[n?.id];
+    if (!n || !info?.ins?.length) { this._toast("This machine has no inputs to match."); return; }
+    const r = this._recipeByCls[n.recipe];
+    const exact = Math.min(...info.ins.map((p) => p.got / (r.inputs[p.item] || 1)));
+    if (!(exact > 0)) { this._toast("Nothing is arriving yet."); return; }
+    // Keep the machine count unless that would need more than 250 %.
+    const count = Math.max(n.count || 1, Math.ceil(exact / 2.5 - 1e-9));
+    this._mutate(() => {
+      n.count = count;
+      n.clock = Math.round(Math.max(1, Math.min(250, (exact / count) * 100)) * 1000) / 1000;
+    });
+  },
+
+  // ----------------------------------------------------------- bridges
+  _toDesign() {
+    const r = this._result;
+    if (!r?.ok || !r.steps.length) { this._toast("Plan something first, then turn it into a design."); return; }
+    if (this._plan.graph.nodes.length && !confirm("Replace the current design with this plan?")) return;
+    const g = designFromResult(r, this._pos, this._items);
+    this._undo = [JSON.stringify(this._plan.graph)];
+    this._redo = [];
+    this._plan.graph = g;
+    this._plan.mode = "design";
+    this._sel = null;
+    this.$("detail").hidden = true;
+    this._markDirty();
+    this._renderPlanPane();
+    this._renderDesignFlow(true);
+    this._renderSummary();
+  },
+  async _fill() {
+    const ev = this._ev;
+    const short = {};
+    const needers = {};
+    for (const n of this._plan.graph.nodes) {
+      for (const p of ev.nodes[n.id]?.ins || []) {
+        const gap = p.want - p.got;
+        if (isShort(p.got, p.want)) { short[p.item] = (short[p.item] || 0) + gap; (needers[p.item] ||= []).push(n.id); }
+      }
+    }
+    const targets = Object.entries(short).map(([item, rate]) => ({ item, rate: Math.round(rate * 1000) / 1000 }));
+    if (!targets.length) return;
+    let r;
+    try {
+      r = await this._hass.callWS({ type: "satisfactory_frm/planner/solve", entry_id: this._entry, targets, options: this._plan.options });
+    } catch (e) { this._toast(`Couldn't plan the shortages: ${e.message || e}`); return; }
+    if (!r.ok) { this._toast(`Couldn't plan the shortages: ${r.error}`); return; }
+    // Lay the new part out to the left of the design.
+    const { nodes, edges } = graphFromResult(r, this._items);
+    const pos = layout(nodes, edges, {});
+    const g = this._plan.graph;
+    const minX = Math.min(...g.nodes.map((n) => n.x)), minY = Math.min(...g.nodes.map((n) => n.y));
+    const part = designFromResult(r, pos, this._items);
+    const width = Math.max(0, ...part.nodes.map((n) => n.x)) + DW + COL_GAP;
+    for (const n of part.nodes) { n.x += minX - width; n.y += minY; }
+    // Outputs of the new part become links straight to the machines that were short.
+    const outIds = new Set(part.nodes.filter((n) => n.type === "output" && n.label !== "Byproduct").map((n) => n.id));
+    const links = [];
+    for (const l of part.links) {
+      if (!outIds.has(l.to)) { links.push(l); continue; }
+      for (const nid of needers[l.item] || []) links.push({ id: newId("l"), from: l.from, to: nid, item: l.item });
+    }
+    this._mutate((gr) => {
+      gr.nodes.push(...part.nodes.filter((n) => !outIds.has(n.id)));
+      gr.links.push(...links);
+    }, { pane: true });
+    this._toast(`Added ${r.steps.length} building group${r.steps.length === 1 ? "" : "s"} for ${targets.map((t) => this._items[t.item]?.name || t.item).join(", ")}.`);
+    this._fitDesign();
+  },
+
+  // ----------------------------------------------------------- summary
+  _renderDesignSummary() {
+    const pane = this.$("sumPane");
+    const ev = this._ev || this._evalDesign();
+    const t = ev.totals;
+    const head = (this._model?.power || []).filter((c) => !c.fuse);
+    const best = head.length ? Math.max(...head.map((c) => c.headroom)) : null;
+    const over = best !== null && t.power > best;
+    const pct = best ? Math.min(100, (t.power / Math.max(best, 1)) * 100) : 0;
+    const errs = ev.problems.filter((p) => p.level === "err").length, warns = ev.problems.filter((p) => p.level === "warn").length;
+    pane.innerHTML = `
+      ${errs || warns ? `<div class="${errs ? "err" : "warn"}">${errs ? `${errs} problem${errs === 1 ? "" : "s"}` : ""}${errs && warns ? " and " : ""}${warns ? `${warns} warning${warns === 1 ? "" : "s"}` : ""}: see Issues on the left.</div>` : ""}
+      <section class="panel" aria-label="Totals"><h2>TOTALS</h2>
+        <div class="kpis"><div class="kpi"><div class="lbl">POWER</div><div class="v" style="color:${over ? PC.red : PC.text}">${fmt(t.power, 1)}<span style="font-size:12px"> MW</span></div></div>
+          <div class="kpi"><div class="lbl">MACHINES</div><div class="v">${t.machines}</div></div></div>
+        ${best !== null ? `<div class="muted" style="margin-top:10px">${over ? `Needs ${fmt(t.power - best, 1)} MW more than your best grid has spare (${fmt(best, 0)} MW).` : `Fits in your grid's spare ${fmt(best, 0)} MW.`}</div>
+          <div class="bar"><span style="width:${pct.toFixed(0)}%;background:${over ? PC.red : pct > 85 ? PC.amber : PC.cyan}"></span></div>` : ""}
+      </section>
+      <section class="panel" aria-label="Outputs"><h2>OUTPUTS</h2><table class="t">${ev.outputs.map((o) =>
+        `<tr><td>${pesc(o.name)}${o.want ? `<div class="muted">wanted ${fmt(o.want, 2)}</div>` : ""}</td><td class="r" style="color:${o.want && isShort(o.got, o.want) ? PC.amber : PC.text}">${fmt(o.got, 2)}</td></tr>`).join("") || `<tr><td class="muted">No outputs yet</td></tr>`}</table></section>
+      <section class="panel" aria-label="Supplies"><h2>SUPPLIES</h2><table class="t">${ev.supplies.map((s) =>
+        `<tr><td>${pesc(s.name)}${s.label ? `<div class="muted">${pesc(s.label)}</div>` : ""}</td><td class="r">${fmt(s.used, 2)} / ${fmt(s.rate, 2)}</td></tr>`).join("") || `<tr><td class="muted">No supplies yet</td></tr>`}</table></section>
+      <section class="panel" aria-label="Buildings"><h2>BUILDINGS</h2><table class="t">${t.buildings.map((b) => `<tr><td>${pesc(b.name)}</td><td class="r">${b.count}</td></tr>`).join("") || `<tr><td class="muted">None</td></tr>`}</table></section>
+      <section class="panel" aria-label="Build cost"><h2>BUILD COST</h2><table class="t">${t.cost.map((c) => `<tr><td>${pesc(c.name)}</td><td class="r">${fmt(c.amount, 0)}</td></tr>`).join("") || `<tr><td class="muted">—</td></tr>`}</table>
+        <div class="muted" style="margin-top:6px">Machines only.</div></section>`;
+  },
+};
+
+Object.assign(SfrmPlannerPanel.prototype, DesignMixin);
 
 if (!customElements.get("sfrm-planner-panel")) customElements.define("sfrm-planner-panel", SfrmPlannerPanel);
 console.info(`%c SFRM factory planner ${PLANNER_VERSION} `, "background:#f99b38;color:#000");
