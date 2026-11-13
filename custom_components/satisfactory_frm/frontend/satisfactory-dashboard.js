@@ -451,6 +451,8 @@ function controlRoomViews(srv, cfg, multi) {
   const base = slug(srv.name) || "satisfactory";
   const pages = CR_PAGES.filter(([page]) => page === "control" || !hide.has(page));
   const nav = pages.map(([page, label]) => ({ page, label, path: page === "control" ? base : `${base}-${page}` }));
+  // The factory planner is its own sidebar page; the tab jumps there.
+  if (!hide.has("planner")) nav.push({ page: "planner", label: "Planner", path: "/satisfactory-planner" });
   return pages.map(([page, label, icon]) => ({
     title: multi ? `${srv.name} · ${label}` : label,
     path: nav.find((n) => n.page === page).path,

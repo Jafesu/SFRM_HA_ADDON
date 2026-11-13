@@ -127,7 +127,7 @@ Options:
 strategy:
   type: custom:satisfactory
   circuit_names: {2: Main grid, 0: Biomass grid}   # name your circuits
-  hide: [map]              # any of power, production, machines, map
+  hide: [map]              # any of power, production, machines, map, planner
   map_height: 720
   layout: classic          # the earlier auto-built layout with standard HA cards
 ```
@@ -162,7 +162,8 @@ if the map card ever shows as a custom element error.)
 
 ## Factory planner
 
-A **Factory planner** page appears in the Home Assistant sidebar. Pick what you
+A **Factory planner** page appears in the Home Assistant sidebar, and the Control Room
+dashboard has a **Planner** tab that opens it. Pick what you
 want to make and how fast, and it works out the cheapest way to do it from your
 live save:
 

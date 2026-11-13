@@ -340,8 +340,10 @@ const fmtMinutes = (m) => (m === null ? "" : m >= 90 ? `${(m / 60).toFixed(1)}h`
 
 // ------------------------------------------------------------------ navigation
 function sfrmNavigate(path) {
+  // A path starting with "/" is a whole page (e.g. the factory planner);
+  // otherwise it's a view of the current dashboard.
   const base = window.location.pathname.split("/").slice(0, 2).join("/");
-  window.history.pushState(null, "", `${base}/${path}`);
+  window.history.pushState(null, "", path.startsWith("/") ? path : `${base}/${path}`);
   window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
 }
 
