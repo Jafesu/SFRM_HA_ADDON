@@ -8,7 +8,7 @@
  * No third-party dependencies.
  */
 
-const PLANNER_VERSION = "0.9.0";
+const PLANNER_VERSION = "0.9.2";
 
 (() => {
   if (document.querySelector("link[data-sfrm-fonts]")) return;
@@ -120,6 +120,12 @@ table.t td.r{text-align:right;font-family:'JetBrains Mono',monospace;white-space
 .mi:hover,.mi:focus-visible{background:#1d2633}
 .fld{display:flex;flex-direction:column;gap:4px;margin-top:6px}
 .fld input,.fld select{width:100%}
+.nodelist{display:flex;flex-direction:column;gap:2px;max-height:200px;overflow:auto;margin-top:4px}
+.nrow{display:flex;align-items:center;gap:8px;min-height:34px;font-size:12px;padding:0 4px;border-radius:6px;cursor:pointer}
+.nrow:hover{background:#1a212c}
+.nrow input{width:18px;height:18px;accent-color:${PC.orange}}
+.pur{font-size:10px;font-weight:700;letter-spacing:.1em;padding:2px 6px;border-radius:4px;min-width:54px;text-align:center}
+.pur.pure{background:#123a26;color:${PC.green}}.pur.normal{background:#1d2633;color:${PC.text2}}.pur.impure{background:#3d2c0b;color:${PC.amber}}
 .port{cursor:crosshair}
 .port:hover{stroke:${PC.orange};stroke-width:2.5}
 .narrow-only,.mid-only{display:none}
@@ -363,6 +369,7 @@ class SfrmPlannerPanel extends HTMLElement {
   _onChange(e) {
     const t = e.target;
     if (t.dataset.field && this._isDesign()) { this._designField(t.dataset.field, t.value); return; }
+    if (t.dataset.pick && this._isDesign()) { this._designField("pick", t.dataset.pick); return; }
     if (t.id === "server") {
       this._entry = t.value;
       try { localStorage.setItem("sfrm_planner_server", t.value); } catch (_) {}
@@ -378,6 +385,10 @@ class SfrmPlannerPanel extends HTMLElement {
       this._renderPlanSelect();
       this._renderPlanPane();
       this._solveSoon(0, true);
+    } else if (t.dataset.opt) {
+      this._plan.options[t.dataset.opt] = t.value;
+      this._markDirty();
+      this._renderSummary();
     } else if (t.dataset.rate !== undefined) {
       const v = Math.max(0, Number(t.value) || 0);
       this._plan.targets[Number(t.dataset.rate)].rate = v;
@@ -569,6 +580,11 @@ class SfrmPlannerPanel extends HTMLElement {
         <div class="opt"><span>Use factory surplus<br><span class="muted">${surplusN ? `${surplusN} items in surplus right now` : "No surplus right now"}</span></span>
           <button class="switch" role="switch" aria-checked="${!!o.use_surplus}" data-act="surplus" aria-label="Use factory surplus"><span></span></button></div>
         ${o.recipes === "all" ? `<div class="muted">Plans with ALL recipes can use ones you haven't unlocked; they're marked LOCKED.</div>` : ""}
+        <div class="opt"><span>Miners</span><select data-opt="miner" aria-label="Miner tier for raw resources">
+          <option value="best" ${!o.miner || o.miner === "best" ? "selected" : ""}>Best unlocked</option>
+          ${(this._model.extractors || []).filter((e) => e.kind === "miner").map((e) => `<option value="${pesc(e.building)}" ${o.miner === e.building ? "selected" : ""}>${pesc(e.name)}${e.unlocked ? "" : " (locked)"}</option>`).join("")}</select></div>
+        <div class="opt"><span>Node purity</span><select data-opt="purity" aria-label="Assumed node purity">
+          ${["Pure", "Normal", "Impure"].map((p) => `<option ${p === (o.purity || "Normal") ? "selected" : ""}>${p}</option>`).join("")}</select></div>
       </section>
       ${r?.ok && r.steps.length ? `<button class="btn" data-act="to-design" style="width:100%">EDIT AS DESIGN</button>` : ""}
       ${usedHtml ? `<section class="panel" aria-label="Recipes used"><h2>RECIPES USED</h2><div class="rlist">${usedHtml}</div>
@@ -867,13 +883,21 @@ class SfrmPlannerPanel extends HTMLElement {
       <section class="panel" aria-label="Buildings"><h2>BUILDINGS</h2><table class="t">${t.buildings.map((b) =>
         `<tr><td>${pesc(b.name)}</td><td class="r">${b.count}</td></tr>`).join("")}</table></section>
       <section class="panel" aria-label="Raw resources"><h2>RAW RESOURCES</h2><table class="t">${r.raw.map((x) => {
-        const fb = x.free_by_purity || {};
-        const note = x.normal_nodes !== undefined
-          ? `${fmt(x.normal_nodes, 2)} normal node${x.normal_nodes === 1 ? "" : "s"} (${x.extractor_name}) · free ${fb.Pure ?? 0}P ${fb.Normal ?? 0}N ${fb.Impure ?? 0}I`
-          : x.extractors !== undefined ? `${x.extractors} × ${x.extractor_name}` : "";
+        const ex = this._dctx().extractors[this._pickExtractor(x.item)];
+        const pur = this._plan.options.purity || "Normal";
+        const fb = this._model.resources?.[x.item]?.free_by_purity || {};
+        let note = "";
+        if (ex) {
+          const per = ex.rate * (ex.purity ? PURITY[pur] : 1);
+          const n = x.rate / per;
+          note = ex.purity
+            ? `${fmt(n, 2)} × ${ex.name} on ${pur.toLowerCase()} nodes · free ${fb.Pure ?? 0}P ${fb.Normal ?? 0}N ${fb.Impure ?? 0}I`
+            : `${fmt(n, 2)} × ${ex.name}`;
+          if (ex.purity && Math.ceil(n - 1e-9) > (fb[pur] ?? 0)) note += ` · only ${fb[pur] ?? 0} ${pur.toLowerCase()} free`;
+        }
         return `<tr><td>${pesc(x.name)}<div class="muted">${pesc(note)}</div></td><td class="r">${fmt(x.rate, 2)}</td></tr>`;
       }).join("") || `<tr><td class="muted">None</td></tr>`}</table>
-        ${r.raw.some((x) => x.normal_nodes !== undefined) ? `<div class="muted" style="margin-top:6px">Node counts assume your best unlocked extractor at 100%. P / N / I = free pure, normal and impure nodes.</div>` : ""}</section>
+        <div class="muted" style="margin-top:6px">At 100% clock, using the miner and purity set in Options. P / N / I = free pure, normal and impure nodes.</div></section>
       ${r.surplus.length ? `<section class="panel" aria-label="From factory surplus"><h2>FROM YOUR SURPLUS</h2><table class="t">${r.surplus.map((x) =>
         `<tr><td>${pesc(x.name)}</td><td class="r">${fmt(x.rate, 2)}</td></tr>`).join("")}</table></section>` : ""}
       ${r.byproducts.length ? `<section class="panel" aria-label="Byproducts"><h2>BYPRODUCTS</h2><table class="t">${r.byproducts.map((x) =>
@@ -1072,6 +1096,18 @@ const newId = (p) => `${p}${Date.now().toString(36)}${(_idSeq++).toString(36)}`;
 const scaleOf = (n) => (n.count || 1) * (n.clock ?? 100) / 100;
 const POWER_EXP = 1.321928;
 // Rounded clocks make "40 of 40.0002" common; ignore gaps below 0.1 % (min 0.01/min).
+const PURITY = { Impure: 0.5, Normal: 1, Pure: 2 };
+const NODE_TYPE = { miner: "Node", oil: "Node", well: "Fracking Satellite" };
+const exCount = (n) => n.nodes?.length || n.count || 1;
+/** Output per minute of an extractor box (picked nodes use their own purity). */
+function extractorOutput(n, ctx) {
+  const ex = ctx.extractors?.[n.building];
+  if (!ex || !n.item) return 0;
+  const clock = (n.clock ?? 100) / 100;
+  if (!ex.purity) return ex.rate * (n.count || 1) * clock;
+  if (n.nodes?.length) return n.nodes.reduce((s, id) => s + ex.rate * (PURITY[ctx.nodeById?.[id]?.purity] ?? 1) * clock, 0);
+  return ex.rate * (PURITY[n.purity] ?? 1) * (n.count || 1) * clock;
+}
 const isShort = (got, want) => got < want - Math.max(0.01, want * 0.001);
 const isSpare = (spare, make) => spare > Math.max(0.05, make * 0.005);
 
@@ -1086,6 +1122,7 @@ function designPorts(n, ctx, graph) {
     };
   }
   if (n.type === "supply") return { ins: [], outs: [{ item: n.item, y: 40 }] };
+  if (n.type === "extractor") return { ins: [], outs: [{ item: n.item, y: 46 }] };
   if (n.type === "output") return { ins: [{ item: n.item, y: 40 }], outs: [] };
   const item = hubItem(n, graph);
   return { ins: [{ item, y: 30, any: true }], outs: [{ item, y: 30, any: true }] };
@@ -1097,6 +1134,7 @@ function hubItem(n, graph) {
 }
 function designSize(n, ctx, graph) {
   if (n.type === "hub") return [HUB_W, 60];
+  if (n.type === "extractor") return [NODE_W + 30, 92];
   if (n.type !== "machine") return [NODE_W, 80];
   const p = designPorts(n, ctx, graph);
   return [DW, PORT_TOP + PORT_ROW * Math.max(1, p.ins.length, p.outs.length) + 30];
@@ -1109,7 +1147,7 @@ function canLink(graph, ctx, fromId, toId, item) {
   const a = byId[fromId], b = byId[toId];
   if (!a || !b) return false;
   const outs = designPorts(a, ctx, graph).outs, ins = designPorts(b, ctx, graph).ins;
-  const okOut = outs.some((p) => p.item === item || (p.any && !p.item) || (a.type === "supply" && !a.item));
+  const okOut = outs.some((p) => p.item === item || (p.any && !p.item) || (a.type === "supply" && !a.item) || (a.type === "extractor" && !a.item && ctx.raw?.[item]));
   const okIn = ins.some((p) => p.item === item || (p.any && !p.item) || (b.type === "output" && !b.item));
   if (!okOut || !okIn) return false;
   return !graph.links.some((l) => l.from === fromId && l.to === toId && l.item === item);
@@ -1149,13 +1187,14 @@ function evaluateDesign(graph, ctx) {
   const received = (id, item, f) => (inL[id] || []).filter((l) => l.item === item).reduce((s, l) => s + f[l.id], 0);
   const producerItems = (n) => {
     if (n.type === "machine") return Object.keys(recipe(n)?.outputs || {});
-    if (n.type === "supply") return n.item ? [n.item] : [];
+    if (n.type === "supply" || n.type === "extractor") return n.item ? [n.item] : [];
     if (n.type === "hub") return [...new Set((outL[n.id] || []).map((l) => l.item))];
     return [];
   };
   const supplyOf = (n, item, f) => {
     if (n.type === "machine") return (recipe(n)?.outputs?.[item] || 0) * scaleOf(n) * eff[n.id];
     if (n.type === "supply") return n.item === item ? Number(n.rate) || 0 : 0;
+    if (n.type === "extractor") return n.item === item ? extractorOutput(n, ctx) : 0;
     if (n.type === "hub") return received(n.id, item, f);
     return 0;
   };
@@ -1247,6 +1286,27 @@ function evaluateDesign(graph, ctx) {
       supplies.push({ id: n.id, item: n.item, name: name(n.item), rate: Number(n.rate) || 0, used, label: n.label || "" });
       if (!n.item) problems.push({ node: n.id, level: "err", text: "Supply has no item" });
       else if (!(outL[n.id] || []).length) problems.push({ node: n.id, level: "warn", text: `${name(n.item)} supply isn't connected` });
+    } else if (n.type === "extractor") {
+      const ex = ctx.extractors?.[n.building];
+      const make = extractorOutput(n, ctx);
+      const used = (outL[n.id] || []).reduce((s, l) => s + flow[l.id], 0);
+      const cnt = exCount(n);
+      const mw = (ex?.power || 0) * cnt * Math.pow((n.clock ?? 100) / 100, POWER_EXP);
+      power += mw;
+      if (ex) {
+        buildings[n.building] = (buildings[n.building] || 0) + cnt;
+        for (const [item, amt] of Object.entries(ex.cost || {})) cost[item] = (cost[item] || 0) + amt * cnt;
+      }
+      nodes[n.id] = { make, used, spare: Math.max(0, make - used), power: mw, count: cnt };
+      supplies.push({ id: n.id, item: n.item, name: name(n.item), rate: make, used, label: ex ? `${cnt} × ${ex.name}${ex.purity && !n.nodes?.length ? ` · ${n.purity || "Normal"}` : n.nodes?.length ? " · picked nodes" : ""}` : "" });
+      if (!n.item) problems.push({ node: n.id, level: "err", text: "Extractor has no resource" });
+      else if (!ex) problems.push({ node: n.id, level: "err", text: "Pick an extractor" });
+      else {
+        if (!ex.unlocked) problems.push({ node: n.id, level: "info", text: `${ex.name} isn't unlocked yet` });
+        if (!(outL[n.id] || []).length) problems.push({ node: n.id, level: "warn", text: `${name(n.item)} extractor isn't connected` });
+        else if (isSpare(make - used, make)) problems.push({ node: n.id, level: "warn", text: `${fmt(make - used, 2)}/min of ${name(n.item)} from extractors isn't used` });
+        for (const id of n.nodes || []) if (ctx.nodeById?.[id] && !ctx.nodeById[id].free) problems.push({ node: n.id, level: "warn", text: `A picked ${name(n.item)} node is already in use` });
+      }
     } else if (n.type === "output") {
       const got = n.item ? received(n.id, n.item, flow) : 0;
       nodes[n.id] = { got };
@@ -1259,6 +1319,22 @@ function evaluateDesign(graph, ctx) {
       if (new Set(links.filter((l) => l.from === n.id || l.to === n.id).map((l) => l.item)).size > 1) problems.push({ node: n.id, level: "err", text: "A splitter/merger can only carry one item" });
     }
   }
+  // Planned extractors vs free nodes of each purity (nodes picked anywhere are taken).
+  if (ctx.nodes?.length) {
+    const picked = new Set(graph.nodes.flatMap((n) => (n.type === "extractor" && n.nodes) || []));
+    const need = {};
+    for (const n of graph.nodes) {
+      const ex = n.type === "extractor" && ctx.extractors?.[n.building];
+      if (!ex || !ex.purity || !n.item || n.nodes?.length) continue;
+      const k = `${n.item}|${n.purity || "Normal"}|${NODE_TYPE[ex.kind]}`;
+      need[k] = (need[k] || 0) + (n.count || 1);
+    }
+    for (const [k, cnt] of Object.entries(need)) {
+      const [item, purity, type] = k.split("|");
+      const free = ctx.nodes.filter((x) => x.item === item && x.purity === purity && x.type === type && x.free && !picked.has(x.id)).length;
+      if (cnt > free) problems.push({ level: "warn", text: `Plan uses ${cnt} ${purity.toLowerCase()} ${name(item)} node${cnt === 1 ? "" : "s"}; ${free} free` });
+    }
+  }
   const linkInfo = {};
   for (const l of links) {
     const t = tier(l.item, flow[l.id]);
@@ -1269,7 +1345,7 @@ function evaluateDesign(graph, ctx) {
     nodes, links: linkInfo, problems, overflow,
     totals: {
       power, machines: Object.values(buildings).reduce((s, v) => s + v, 0),
-      buildings: Object.entries(buildings).map(([b, c]) => ({ building: b, name: ctx.buildings?.[b]?.name || b, count: c })).sort((a, b) => b.count - a.count),
+      buildings: Object.entries(buildings).map(([b, c]) => ({ building: b, name: ctx.buildings?.[b]?.name || ctx.extractors?.[b]?.name || b, count: c })).sort((a, b) => b.count - a.count),
       cost: Object.entries(cost).map(([i, a]) => ({ item: i, name: name(i), amount: a })).sort((a, b) => b.amount - a.amount),
     },
     supplies, outputs,
@@ -1277,7 +1353,7 @@ function evaluateDesign(graph, ctx) {
 }
 
 /** Turn a solver result into a design graph (positions from the current layout). */
-function designFromResult(r, pos, items) {
+function designFromResult(r, pos, items, rawFn) {
   const nodes = [], links = [], idMap = {};
   // Design boxes are wider and taller than solve boxes: spread the layout out.
   const sx = (DW + COL_GAP) / (NODE_W + COL_GAP), sy = 1.35;
@@ -1292,7 +1368,13 @@ function designFromResult(r, pos, items) {
     idMap[x.id] = id;
     nodes.push({ id, type: "supply", item: x.item, rate: Math.ceil(x.rate * 100 + 1e-9) / 100, label, x: at(x.id)[0], y: at(x.id)[1] });
   };
-  r.raw.forEach((x) => sup(x, "Raw"));
+  r.raw.forEach((x) => {
+    const ex = rawFn?.(x.item, x.rate);
+    if (!ex) { sup(x, "Raw"); return; }
+    const id = newId("e");
+    idMap[x.id] = id;
+    nodes.push({ id, ...ex, x: at(x.id)[0], y: at(x.id)[1] });
+  });
   r.surplus.forEach((x) => sup(x, "From surplus"));
   r.missing.forEach((x) => sup(x, "Missing"));
   for (const x of [...r.outputs, ...r.byproducts]) {
@@ -1339,6 +1421,21 @@ function designNodeBody(n, ev, ctx, graph, selected) {
     });
     b += `<text x="16" y="${H - 9}" font-family="JetBrains Mono, monospace" font-size="11" fill="${effC}">running ${fmt(e * 100, 1)}%</text>
       <text x="${W - 12}" y="${H - 9}" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="${PC.dim}">${fmt(info.power, 1)} MW</text>`;
+  } else if (n.type === "extractor") {
+    const ex = ctx.extractors?.[n.building];
+    const cnt = exCount(n);
+    const tag = `${cnt} × ${(ex?.name || "EXTRACTOR").toUpperCase()}`;
+    const pur = ex?.purity ? (n.nodes?.length ? "PICKED NODES" : (n.purity || "Normal").toUpperCase()) : "";
+    const st = selected ? PC.orange : bad ? "#ff6b5e" : warn ? "#8a6a26" : "#2a5662";
+    b += `<rect class="box" width="${W}" height="${H}" rx="8" fill="#0f1a1e" stroke="${st}" stroke-width="${selected || bad ? 2 : 1}"/>
+      <rect width="6" height="${H}" rx="3" fill="${ex?.unlocked === false ? PC.amber : PC.cyan}"/>
+      <text x="16" y="20" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="${PC.cyan}">${pesc(clip(tag, 24))}</text>
+      <text x="16" y="42" font-size="14" font-weight="600" fill="${PC.text}">${pesc(clip(name(n.item), 20))}</text>
+      ${pur ? `<text x="${W - 12}" y="42" text-anchor="end" font-size="10" font-weight="700" letter-spacing="1" fill="${n.purity === "Pure" && !n.nodes?.length ? PC.green : n.purity === "Impure" && !n.nodes?.length ? PC.amber : PC.dim}">${pur}</text>` : ""}
+      <text x="16" y="64" font-family="JetBrains Mono, monospace" font-size="11" fill="${PC.text2}">${fmt(info.make, 2)}/min @ ${fmt(n.clock ?? 100, 2)}%</text>
+      <text x="16" y="82" font-family="JetBrains Mono, monospace" font-size="11" fill="${isSpare(info.spare || 0, info.make || 0) ? PC.amber : PC.dim}">${fmt(info.used, 2)} used</text>
+      <text x="${W - 12}" y="82" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="${PC.dim}">${fmt(info.power, 1)} MW</text>`;
+    b += port(W, 46, n.item, "out", true);
   } else if (n.type === "supply" || n.type === "output") {
     const isS = n.type === "supply";
     const tag = isS ? (n.label || "SUPPLY").toUpperCase() : (n.label || "OUTPUT").toUpperCase();
@@ -1362,9 +1459,46 @@ function designNodeBody(n, ev, ctx, graph, selected) {
 const DesignMixin = {
   _dctx() {
     const m = this._model || {};
-    return { recipes: this._recipeByCls || {}, items: this._items || {}, belts: m.belts || [], pipes: m.pipes || [], buildings: m.buildings || {} };
+    if (this._ctxModel !== m) {
+      this._ctxModel = m;
+      this._exMap = Object.fromEntries((m.extractors || []).map((e) => [e.building, e]));
+      this._nodeById = Object.fromEntries((m.nodes || []).map((x) => [x.id, x]));
+    }
+    return { recipes: this._recipeByCls || {}, items: this._items || {}, belts: m.belts || [], pipes: m.pipes || [], buildings: m.buildings || {},
+      extractors: this._exMap, nodes: m.nodes || [], nodeById: this._nodeById, raw: m.raw || {} };
   },
   _isDesign() { return this._plan.mode === "design"; },
+  /** Best extractor for a resource: the plan's chosen miner tier, else the fastest unlocked. */
+  _pickExtractor(item, current) {
+    const ctx = this._dctx(), allowAll = this._plan.options.recipes === "all";
+    const kinds = item ? ctx.raw[item] || ["miner"] : ["miner"];
+    const list = Object.values(ctx.extractors || {}).filter((e) => kinds.includes(e.kind));
+    if (current && list.some((e) => e.building === current)) return current;
+    const want = this._plan.options.miner;
+    if (kinds.includes("miner") && want && want !== "best" && list.some((e) => e.building === want)) return want;
+    const ok = list.filter((e) => e.unlocked || allowAll);
+    const pool = ok.length ? ok : list;
+    // Prefer node extractors over well extractors for oil and water.
+    pool.sort((a, b) => Number(a.kind === "well") - Number(b.kind === "well") || b.rate - a.rate);
+    return pool[0]?.building || null;
+  },
+  /** Extractor count and clock to supply `rate` per minute. */
+  _sizeExtractor(building, purity, rate) {
+    const ex = this._dctx().extractors[building];
+    const per = ex ? ex.rate * (ex.purity ? PURITY[purity] ?? 1 : 1) : 60;
+    const exact = rate > 0 ? rate / per : 1;
+    const count = Math.max(1, Math.ceil(exact - 1e-9));
+    return { count, clock: Math.round(Math.max(1, Math.min(250, (exact / count) * 100)) * 1e4) / 1e4 };
+  },
+  /** For converting solver results: raw materials become extractor boxes. */
+  _rawToExtractor(item, rate) {
+    const ctx = this._dctx();
+    if (!ctx.raw[item]) return null;
+    const building = this._pickExtractor(item);
+    if (!building) return null;
+    const purity = this._plan.options.purity || "Normal";
+    return { type: "extractor", item, building, purity, nodes: [], ...this._sizeExtractor(building, purity, rate) };
+  },
   _setMode(mode) {
     if (mode === this._plan.mode) return;
     if (mode === "design" && !this._plan.graph.nodes.length && this._result?.ok && this._result.steps.length) {
@@ -1451,7 +1585,8 @@ const DesignMixin = {
       <section class="panel" aria-label="Add buildings"><h2>ADD</h2>
         <input id="palQ" type="text" placeholder="Search recipes, items, buildings…" aria-label="Search recipes" value="${pesc(this._paletteQ || "")}" style="width:100%;margin-bottom:8px">
         <div class="palist">
-          ${row("supply", "", "Supply", "Raw resource or incoming items")}
+          ${row("extractor", "", "Miner / extractor", "Ore, oil, water or nitrogen, with tier and node purity")}
+          ${row("supply", "", "Supply", "Items coming in from elsewhere")}
           ${row("output", "", "Output", "Where the finished items go")}
           ${row("hub", "", "Splitter / merger", "Split or join one item")}
           ${recipes.map((r) => row("machine", r.cls, r.name.replace(/^Alternate: /, ""), r.building_name,
@@ -1491,6 +1626,7 @@ const DesignMixin = {
     const node = { id: newId(kind[0]), type: kind, x: Math.round(x), y: Math.round(y) };
     if (kind === "machine") Object.assign(node, { recipe: arg, count: 1, clock: 100 });
     if (kind === "supply") Object.assign(node, { item: arg || null, rate: 60, label: "" });
+    if (kind === "extractor") Object.assign(node, { item: arg || null, building: this._pickExtractor(arg || null), purity: "Normal", count: 1, clock: 100, nodes: [] });
     if (kind === "output") Object.assign(node, { item: arg || null, want: null, label: "" });
     if (kind === "hub") node.item = arg || null;
     this._mutate((g) => g.nodes.push(node));
@@ -1612,6 +1748,7 @@ const DesignMixin = {
     const ctx = this._dctx(), name = (i) => ctx.items[i]?.name || i || "nothing";
     if (n.type === "machine") { const r = ctx.recipes[n.recipe]; return `${n.count} ${r?.building_name || ""} making ${r?.name || n.recipe} at ${n.clock} percent`; }
     if (n.type === "supply") return `Supply of ${name(n.item)}, ${n.rate} per minute`;
+    if (n.type === "extractor") return `${exCount(n)} ${ctx.extractors?.[n.building]?.name || "extractors"} on ${name(n.item)}`;
     if (n.type === "output") return `Output for ${name(n.item)}`;
     return "Splitter or merger";
   },
@@ -1645,6 +1782,7 @@ const DesignMixin = {
         for (const id of [fromId, toId]) {
           const n = gr.nodes.find((x) => x.id === id);
           if ((n.type === "supply" || n.type === "output" || n.type === "hub") && !n.item) n.item = item;
+          if (n.type === "extractor" && !n.item) { n.item = item; n.building = this._pickExtractor(item, n.building); }
         }
       });
       return true;
@@ -1673,15 +1811,20 @@ const DesignMixin = {
     const ok = (r) => r.unlocked || allowAll;
     const list = (this._model.recipes || []).filter((r) => ok(r) && (w.dir === "out" ? item in r.inputs : item in r.outputs))
       .sort((a, b) => Number(b.unlocked) - Number(a.unlocked) || a.name.localeCompare(b.name)).slice(0, 14);
+    const ctx = this._dctx();
+    const exOpts = w.dir === "in" && ctx.raw[item]
+      ? Object.values(ctx.extractors).filter((e) => ctx.raw[item].includes(e.kind) && (e.unlocked || allowAll))
+          .sort((a, b) => b.rate - a.rate).map((e) => [`extractor|${e.building}`, `${e.name}${e.purity ? " · Normal node" : ""}`])
+      : [];
     const special = w.dir === "out"
       ? [["output", `Output: ${name}`], ["hub", "Splitter"]]
-      : [["supply", `Supply: ${name}`], ["hub", "Merger"]];
+      : [...exOpts, ["supply", `Supply: ${name}`], ["hub", "Merger"]];
     const menu = this.$("cmenu");
     const fr = this.$("flowPane").getBoundingClientRect();
     menu.style.left = `${Math.min(cx - fr.left, fr.width - 270)}px`;
     menu.style.top = `${Math.min(cy - fr.top, fr.height - 320)}px`;
     menu.innerHTML = `<div class="lbl" style="padding:6px 8px">${w.dir === "out" ? "SEND" : "GET"} ${pesc(name.toUpperCase())} ${w.dir === "out" ? "TO" : "FROM"}</div>
-      ${special.map(([k, t]) => `<button class="mi" data-act="menu-pick" data-arg="${k}|">${pesc(t)}</button>`).join("")}
+      ${special.map(([k, t]) => `<button class="mi" data-act="menu-pick" data-arg="${k.includes("|") ? k : `${k}|`}">${pesc(t)}</button>`).join("")}
       ${list.map((r) => `<button class="mi" data-act="menu-pick" data-arg="machine|${pesc(r.cls)}">${pesc(r.name.replace(/^Alternate: /, ""))}<span class="muted"> · ${pesc(r.building_name)}${r.unlocked ? "" : " · locked"}</span></button>`).join("")}
       ${list.length ? "" : `<div class="muted" style="padding:6px 8px">No ${allowAll ? "" : "unlocked "}recipe ${w.dir === "out" ? "uses" : "makes"} ${pesc(name)}.</div>`}
       <button class="mi" data-act="menu-close" style="color:${PC.dim}">Cancel</button>`;
@@ -1708,6 +1851,10 @@ const DesignMixin = {
       const exact = per > 0 && rate > 0 ? rate / per : 1;
       const count = Math.max(1, Math.ceil(exact - 1e-6));
       Object.assign(node, { recipe: cls, count, clock: Math.round(Math.min(250, Math.max(1, (exact / count) * 100)) * 1000) / 1000 });
+    } else if (kind === "extractor") {
+      const port = (this._ev.nodes[w.node.id]?.ins || []).find((p) => p.item === w.item);
+      const rate = Math.max(0, (port?.want ?? 0) - (port?.got ?? 0)) || (port?.want ?? 60);
+      Object.assign(node, { item: w.item, building: cls, purity: "Normal", nodes: [], ...this._sizeExtractor(cls, "Normal", rate) });
     } else if (kind === "supply") {
       const port = (this._ev.nodes[w.node.id]?.ins || []).find((p) => p.item === w.item);
       Object.assign(node, { item: w.item, rate: Math.round(Math.max(0, (port?.want ?? 60) - (port?.got ?? 0)) * 1000) / 1000 || 60, label: "" });
@@ -1750,6 +1897,34 @@ const DesignMixin = {
         <table>${rows(info.ins || [], (p) => `<tr><td>${pesc(p.name)}</td><td class="r" style="color:${isShort(p.got, p.want) ? PC.amber : PC.text2}">${fmt(p.got, 2)} / ${fmt(p.want, 2)}</td></tr>`)}
         ${rows(info.outs || [], (p) => `<tr><td>→ ${pesc(p.name)}</td><td class="r">${fmt(p.make, 2)}${isSpare(p.spare, p.make) ? ` <span style="color:${PC.amber}">(${fmt(p.spare, 2)} spare)</span>` : ""}</td></tr>`)}</table>
         <div class="row" style="gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn ghost" data-act="balance">MATCH INPUTS</button><button class="btn ghost" data-act="dup">DUPLICATE</button><button class="btn ghost" data-act="del-sel">DELETE</button></div>`;
+    } else if (n.type === "extractor") {
+      const info = ev.nodes[n.id] || {}, ex = ctx.extractors[n.building];
+      const allowAll = this._plan.options.recipes === "all";
+      const rawItems = Object.keys(ctx.raw).sort((a, b) => name(a).localeCompare(name(b)));
+      const exList = n.item ? Object.values(ctx.extractors).filter((e) => ctx.raw[n.item]?.includes(e.kind) && (e.unlocked || allowAll || e.building === n.building)) : [];
+      const picked = new Set(n.nodes || []);
+      const takenElsewhere = new Set(g.nodes.filter((x) => x.id !== n.id && x.type === "extractor").flatMap((x) => x.nodes || []));
+      const type = ex ? NODE_TYPE[ex.kind] : null;
+      const cand = ex?.purity && n.item ? ctx.nodes.filter((x) => x.item === n.item && x.type === type && (picked.has(x.id) || (x.free && !takenElsewhere.has(x.id)))) : [];
+      const pr = { Pure: 0, Normal: 1, Impure: 2 };
+      cand.sort((a, b) => Number(picked.has(b.id)) - Number(picked.has(a.id)) || pr[a.purity] - pr[b.purity] || a.z - b.z);
+      const freeBy = { Pure: 0, Normal: 0, Impure: 0 };
+      for (const x of cand) if (!picked.has(x.id)) freeBy[x.purity]++;
+      const km = (v) => (v / 100000).toFixed(1);
+      html = head(ex ? ex.name : "Extractor") + `
+        <label class="fld"><span class="lbl">RESOURCE</span><select data-field="ritem"><option value="">Choose…</option>${rawItems.map((i) => `<option value="${pesc(i)}" ${i === n.item ? "selected" : ""}>${pesc(name(i))}</option>`).join("")}</select></label>
+        ${n.item ? `<label class="fld"><span class="lbl">EXTRACTOR</span><select data-field="building">${exList.map((e) => `<option value="${pesc(e.building)}" ${e.building === n.building ? "selected" : ""}>${pesc(e.name)} · ${fmt(e.rate, 0)}/min${e.purity ? " on Normal" : ""}${e.unlocked ? "" : " (locked)"}</option>`).join("")}</select></label>` : ""}
+        <div class="row" style="gap:8px;margin-top:8px">
+          ${ex?.purity && !picked.size ? `<label class="fld" style="flex:1"><span class="lbl">NODE PURITY</span><select data-field="purity">${["Pure", "Normal", "Impure"].map((p) => `<option ${p === (n.purity || "Normal") ? "selected" : ""}>${p}</option>`).join("")}</select></label>` : ""}
+          <label class="fld" style="flex:1"><span class="lbl">${ex?.purity ? "EXTRACTORS" : "EXTRACTORS"}</span><input type="number" min="1" max="1000" step="1" data-field="count" value="${exCount(n)}" ${picked.size ? "disabled title=\"Set by the nodes you picked\"" : ""}></label>
+          <label class="fld" style="flex:1"><span class="lbl">CLOCK %</span><input type="number" min="1" max="250" step="any" data-field="clock" value="${fmt(n.clock ?? 100, 3)}"></label>
+        </div>
+        <div class="muted" style="margin-top:6px">${fmt(info.make, 2)}/min · ${fmt(info.used, 2)} used · ${fmt(info.power, 1)} MW</div>
+        ${ex?.purity && n.item ? `<div class="lbl" style="margin-top:10px">NODES ${picked.size ? `· ${picked.size} PICKED` : `· FREE ${freeBy.Pure} PURE · ${freeBy.Normal} NORMAL · ${freeBy.Impure} IMPURE`}</div>
+          <div class="muted" style="margin:2px 0 4px">${picked.size ? "Output uses each picked node's purity." : "Optional: pick the actual nodes you'll use."}</div>
+          <div class="nodelist">${cand.slice(0, 60).map((x) => `<label class="nrow"><input type="checkbox" data-pick="${pesc(x.id)}" ${picked.has(x.id) ? "checked" : ""}>
+            <span class="pur ${x.purity.toLowerCase()}">${x.purity}</span><span class="mono">height ${fmt(x.z / 100, 0)} m · at ${km(x.x)}, ${km(x.y)} km</span></label>`).join("") || `<div class="muted">No free ${type === "Node" ? "nodes" : "well satellites"} left for ${pesc(name(n.item))}.</div>`}</div>` : ""}
+        <div class="row" style="gap:6px;margin-top:10px"><button class="btn ghost" data-act="dup">DUPLICATE</button><button class="btn ghost" data-act="del-sel">DELETE</button></div>`;
     } else if (n.type === "supply" || n.type === "output") {
       const s = n.type === "supply", info = ev.nodes[n.id] || {};
       const res = s && n.item ? this._model.resources?.[n.item] : null;
@@ -1778,6 +1953,18 @@ const DesignMixin = {
       else if (field === "rate") n.rate = Math.max(0, Number(value) || 0);
       else if (field === "want") n.want = value === "" ? null : Math.max(0, Number(value) || 0);
       else if (field === "label") n.label = String(value).slice(0, 80);
+      else if (field === "building") { n.building = value; n.nodes = []; }
+      else if (field === "purity") n.purity = value;
+      else if (field === "ritem") {
+        n.item = value || null;
+        n.building = this._pickExtractor(n.item, n.building);
+        n.nodes = [];
+        this._plan.graph.links = this._plan.graph.links.filter((l) => l.from !== n.id || l.item === n.item);
+      } else if (field === "pick") {
+        const set = new Set(n.nodes || []);
+        if (set.has(value)) set.delete(value); else set.add(value);
+        n.nodes = [...set];
+      }
       else if (field === "recipe") {
         n.recipe = value;
         const r = this._recipeByCls[value];
@@ -1830,7 +2017,7 @@ const DesignMixin = {
     const r = this._result;
     if (!r?.ok || !r.steps.length) { this._toast("Plan something first, then turn it into a design."); return; }
     if (this._plan.graph.nodes.length && !confirm("Replace the current design with this plan?")) return;
-    const g = designFromResult(r, this._pos, this._items);
+    const g = designFromResult(r, this._pos, this._items, (i, v) => this._rawToExtractor(i, v));
     this._undo = [JSON.stringify(this._plan.graph)];
     this._redo = [];
     this._plan.graph = g;
@@ -1864,7 +2051,7 @@ const DesignMixin = {
     const pos = layout(nodes, edges, {});
     const g = this._plan.graph;
     const minX = Math.min(...g.nodes.map((n) => n.x)), minY = Math.min(...g.nodes.map((n) => n.y));
-    const part = designFromResult(r, pos, this._items);
+    const part = designFromResult(r, pos, this._items, (i, v) => this._rawToExtractor(i, v));
     const width = Math.max(0, ...part.nodes.map((n) => n.x)) + DW + COL_GAP;
     for (const n of part.nodes) { n.x += minX - width; n.y += minY; }
     // Outputs of the new part become links straight to the machines that were short.

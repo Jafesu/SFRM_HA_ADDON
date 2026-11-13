@@ -72,6 +72,9 @@ class GameModel:
     buildings: dict[str, dict[str, Any]] = field(default_factory=dict)  # Build cls -> {name, unlocked, cost}
     resources: dict[str, dict[str, Any]] = field(default_factory=dict)  # raw item -> node stats
     weights: dict[str, float] = field(default_factory=dict)  # raw item -> cost per unit/min
+    # Every raw resource node: {id, item, purity, free, type ("Node" or
+    # "Fracking Satellite"), x, y, z} in game units.
+    nodes: list[dict[str, Any]] = field(default_factory=list)
 
     # --- building the model from FRM data --------------------------------------
 
@@ -138,6 +141,13 @@ class GameModel:
             )
             st["nodes"] += 1
             st["capacity"] += purity
+            loc = n.get("location") or {}
+            model.nodes.append({
+                "id": n.get("ID"), "item": item, "purity": n.get("Purity") or "Normal",
+                "free": not n.get("Exploited"), "type": n.get("NodeType") or "Node",
+                "x": round(float(loc.get("x") or 0)), "y": round(float(loc.get("y") or 0)),
+                "z": round(float(loc.get("z") or 0)),
+            })
             if not n.get("Exploited"):
                 st["free"] += 1
                 st["free_capacity"] += purity

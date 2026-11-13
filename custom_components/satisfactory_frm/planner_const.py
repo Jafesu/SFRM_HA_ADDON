@@ -43,6 +43,23 @@ WATER_EXTRACTOR_RATE: Final = 120  # not affected by purity
 OIL_EXTRACTOR_RATE: Final = 120
 WELL_SATELLITE_RATE: Final = 60  # resource well extractor on a Normal satellite
 
+# Extractors the planner can place: base rate per minute at 100 % on a Normal
+# node (or anywhere, for water extractors), and which resources they work on.
+EXTRACTORS: Final[dict[str, dict]] = {
+    "Build_MinerMk1_C": {"rate": 60, "purity": True, "kind": "miner"},
+    "Build_MinerMk2_C": {"rate": 120, "purity": True, "kind": "miner"},
+    "Build_MinerMk3_C": {"rate": 240, "purity": True, "kind": "miner"},
+    "Build_WaterPump_C": {"rate": 120, "purity": False, "kind": "water"},
+    "Build_OilPump_C": {"rate": 120, "purity": True, "kind": "oil"},
+    "Build_FrackingExtractor_C": {"rate": 60, "purity": True, "kind": "well"},
+}
+# Which extractor kinds can supply each raw resource.
+RESOURCE_EXTRACTORS: Final[dict[str, tuple[str, ...]]] = {
+    "Desc_LiquidOil_C": ("oil", "well"),
+    "Desc_NitrogenGas_C": ("well",),
+    "Desc_Water_C": ("water", "well"),
+}  # everything else in RAW_RESOURCES: ("miner",)
+
 # Transport capacity per minute.
 BELT_SPEEDS: Final[dict[str, float]] = {
     "Build_ConveyorBeltMk1_C": 60,

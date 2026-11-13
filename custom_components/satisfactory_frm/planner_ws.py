@@ -32,7 +32,14 @@ from homeassistant.util import dt as dt_util
 from .api import FRMError
 from .const import DOMAIN
 from .planner import GameModel, PlanOptions, solve
-from .planner_const import BELT_SPEEDS, PIPE_SPEEDS
+from .planner_const import (
+    BELT_SPEEDS,
+    BUILDING_POWER,
+    EXTRACTORS,
+    PIPE_SPEEDS,
+    RAW_RESOURCES,
+    RESOURCE_EXTRACTORS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 MODEL_MAX_AGE = timedelta(minutes=10)
@@ -191,6 +198,21 @@ def model_summary(model: GameModel) -> dict[str, Any]:
             if b in {r.building for r in model.recipes.values()} or b in BELT_SPEEDS or b in PIPE_SPEEDS
         },
         "resources": model.resources,
+        "nodes": model.nodes,
+        "extractors": [
+            {
+                "building": b,
+                "name": model.building_name(b),
+                "unlocked": bool(model.buildings.get(b, {}).get("unlocked")),
+                "rate": v["rate"],
+                "purity": v["purity"],
+                "kind": v["kind"],
+                "power": BUILDING_POWER.get(b, 0.0),
+                "cost": model.buildings.get(b, {}).get("cost", {}),
+            }
+            for b, v in EXTRACTORS.items()
+        ],
+        "raw": {i: list(RESOURCE_EXTRACTORS.get(i, ("miner",))) for i in RAW_RESOURCES},
         "weights": model.weights,
         "belt": model.best_belt(),
         # Unlocked transport tiers, slowest first: [class, name, per minute].
@@ -245,7 +267,10 @@ async def ws_model(hass: HomeAssistant, connection: websocket_api.ActiveConnecti
 _NODE = vol.Schema(
     {
         vol.Required("id"): vol.All(str, vol.Length(max=40)),
-        vol.Required("type"): vol.In(["machine", "supply", "output", "hub"]),
+        vol.Required("type"): vol.In(["machine", "supply", "output", "hub", "extractor"]),
+        vol.Optional("building"): vol.All(str, vol.Length(max=80)),
+        vol.Optional("purity"): vol.In(["Impure", "Normal", "Pure"]),
+        vol.Optional("nodes"): vol.All([vol.All(str, vol.Length(max=80))], vol.Length(max=200)),
         vol.Optional("recipe"): vol.All(str, vol.Length(max=120)),
         vol.Optional("count"): vol.All(vol.Coerce(int), vol.Range(min=1, max=1000)),
         vol.Optional("clock"): vol.All(vol.Coerce(float), vol.Range(min=1, max=250)),
@@ -283,6 +308,8 @@ OPTIONS_SCHEMA = vol.Schema(
         vol.Optional("enabled"): [str],
         vol.Optional("use_surplus"): bool,
         vol.Optional("include_events"): bool,
+        vol.Optional("miner"): vol.All(str, vol.Length(max=80)),
+        vol.Optional("purity"): vol.In(["Impure", "Normal", "Pure"]),
     },
     extra=vol.REMOVE_EXTRA,
 )

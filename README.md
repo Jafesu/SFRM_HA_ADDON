@@ -170,6 +170,7 @@ live save:
 - only recipes you've **unlocked** (milestones, M.A.M., AWESOME Shop, hard drives,
   including alternates), or **all** recipes to plan ahead (locked ones are marked)
 - optionally **uses your factory's current surplus** as free input
+- choose which **miner tier** and **node purity** to assume for raw resources
 - shows **building counts and clock speeds**, **power** against your grid's spare
   capacity, **raw resources** with how many nodes that takes and how many free
   nodes of each purity your map has left, the **belt or pipe tier** each link needs
@@ -180,8 +181,12 @@ live save:
 
 **Design mode** lets you build the factory yourself instead:
 
-- drag buildings (any recipe you've unlocked), **supplies**, **outputs** and
-  **splitter/mergers** from the palette onto the canvas, or tap to add
+- drag buildings (any recipe you've unlocked), **miners / extractors**, **supplies**,
+  **outputs** and **splitter/mergers** from the palette onto the canvas, or tap to add
+- a **miner / extractor** box takes the resource, the extractor (Miner Mk.1/2/3, Water
+  Extractor, Oil Extractor, Resource Well Extractor), node purity, count and clock;
+  you can also **pick the actual free nodes** from your save, and it then uses each
+  node's real purity. It warns when a plan needs more nodes of a purity than are free
 - drag from a port to another box to **connect** them; drop a connection on empty
   space to pick a building that uses (or makes) that item, sized to match
 - set **machine count and clock speed**, change recipe, duplicate, delete, undo/redo
