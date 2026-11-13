@@ -13,7 +13,13 @@
  * falling back to this browser's localStorage).
  */
 
-const VERSION = "0.5.0";
+const VERSION = "0.7.0";
+const PIPE_STATUS_COLOR = {
+  starving: "rgb(255,90,78)",
+  over_capacity: "rgb(255,90,78)",
+  short_supply: "rgb(245,183,64)",
+  no_source: "rgb(245,183,64)",
+};
 
 const LAYERS = {
   // id: [label, default visible]
@@ -475,6 +481,10 @@ class SatisfactoryMapCard extends HTMLElement {
     if (!this._info?.world_ready || !(id in (this._info.layers || {}))) return;
     try {
       this._data[id] = await this._hass.callWS({ type: "satisfactory_frm/map_layer", entry_id: this._entry, layer: id });
+      if (id === "pipes") {
+        // Pipe network status from the integration, so problem lines stand out.
+        this._pipelines = await this._hass.callWS({ type: "satisfactory_frm/pipelines", entry_id: this._entry }).catch(() => null);
+      }
     } catch (e) {
       // Layer endpoints can be missing on older FRM versions; keep the last data.
     }
@@ -758,17 +768,31 @@ class SatisfactoryMapCard extends HTMLElement {
 
   _drawSplines(layer, items) {
     const ctx = this._ctx;
-    ctx.strokeStyle = layer === "train_rails" ? C.rail : layer === "belts" ? C.belt : C.pipe;
-    ctx.lineWidth = layer === "train_rails" ? 2 : 1.25;
+    const base = layer === "train_rails" ? C.rail : layer === "belts" ? C.belt : C.pipe;
     ctx.lineCap = ctx.lineJoin = "round";
-    ctx.beginPath();
+    // Pipes on a line with a problem are drawn thicker in the status colour.
+    const groups = new Map([[base, []]]);
+    const pl = layer === "pipes" ? this._pipelines : null;
+    const statusOf = {};
+    for (const n of pl?.networks || []) statusOf[n.key] = n.status;
     for (const o of items) {
-      const pts = o.SplineData;
-      if (!Array.isArray(pts) || pts.length < 2 || !this._inZ(o)) continue;
-      ctx.moveTo(this._sx(pts[0].x), this._sy(-pts[0].y));
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(this._sx(pts[i].x), this._sy(-pts[i].y));
+      const st = pl ? statusOf[pl.pipe_network?.[o.ID]] : undefined;
+      const color = PIPE_STATUS_COLOR[st] || base;
+      if (!groups.has(color)) groups.set(color, []);
+      groups.get(color).push(o);
     }
-    ctx.stroke();
+    for (const [color, list] of groups) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = layer === "train_rails" ? 2 : color === base ? 1.25 : 2.5;
+      ctx.beginPath();
+      for (const o of list) {
+        const pts = o.SplineData;
+        if (!Array.isArray(pts) || pts.length < 2 || !this._inZ(o)) continue;
+        ctx.moveTo(this._sx(pts[0].x), this._sy(-pts[0].y));
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(this._sx(pts[i].x), this._sy(-pts[i].y));
+      }
+      ctx.stroke();
+    }
   }
 
   _drawCables(items) {

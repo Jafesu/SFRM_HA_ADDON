@@ -22,11 +22,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import FRMClient, FRMConnectionError, FRMError, FRMNotReady
+from .pipes import Network, build_networks, keep_keys, slim_pipes
 
 _LOGGER = logging.getLogger(__name__)
+PIPES_REFRESH = timedelta(minutes=5)
 
 
 def save_slug(session_name: str | None) -> str | None:
@@ -111,6 +114,10 @@ class SlowData:
     # "factory" | "extractor" | "generator".
     machines: dict[str, dict[str, Any]] = field(default_factory=dict)
     machines_ok: bool = False  # True only if all building lists loaded
+    # Pipe networks by network key (see pipes.py). networks_ok: built from a
+    # complete building list and a pipe list for this save.
+    networks: dict[str, Network] = field(default_factory=dict)
+    networks_ok: bool = False
 
 
 class FRMFastCoordinator(DataUpdateCoordinator[FastData]):
@@ -232,6 +239,39 @@ class FRMSlowCoordinator(DataUpdateCoordinator[SlowData]):
         )
         self.client = client
         self.fast = fast
+        # getPipes is large (~3 KB per pipe) and only changes when you build, so
+        # it's cached and refreshed every PIPES_REFRESH or when buildings change.
+        self._pipes: list[dict[str, Any]] | None = None
+        self._pipes_at: datetime | None = None
+        self._pipes_key: tuple[str | None, int] | None = None
+        # Pipe ID -> network key per save, kept across restarts so network
+        # entities keep their identity (see pipes.keep_keys).
+        self._key_store: Store[dict[str, dict[str, str]]] = Store(
+            hass, 1, f"satisfactory_frm.pipelines.{entry.entry_id}"
+        )
+        self._pipe_keys: dict[str, dict[str, str]] = {}
+
+    async def async_load_network_keys(self) -> None:
+        self._pipe_keys = await self._key_store.async_load() or {}
+
+    async def _get_pipes(self, session: str | None, machine_count: int) -> list[dict[str, Any]] | None:
+        now = dt_util.utcnow()
+        key = (session, machine_count)
+        if (
+            self._pipes is not None
+            and self._pipes_key == key
+            and self._pipes_at is not None
+            and now - self._pipes_at < PIPES_REFRESH
+        ):
+            return self._pipes
+        try:
+            pipes = slim_pipes(await self.client.get_list("getPipes"))
+        except FRMError as err:
+            _LOGGER.debug("getPipes failed: %s", err)
+            # Keep the last good list for the same save rather than dropping networks.
+            return self._pipes if self._pipes_key and self._pipes_key[0] == session else None
+        self._pipes, self._pipes_at, self._pipes_key = pipes, now, key
+        return pipes
 
     async def _async_update_data(self) -> SlowData:
         fast = self.fast.data
@@ -268,6 +308,18 @@ class FRMSlowCoordinator(DataUpdateCoordinator[SlowData]):
                 if bid:
                     data.machines[str(bid)] = {**raw, "_kind": kind}
         data.machines_ok = ok
+        if ok:
+            pipes = await self._get_pipes(data.session_name, len(data.machines))
+            if pipes is not None:
+                save = save_slug(data.session_name) or ""
+                networks, pipe_keys = keep_keys(
+                    build_networks(pipes, data.machines), self._pipe_keys.get(save, {})
+                )
+                if pipe_keys != self._pipe_keys.get(save):
+                    self._pipe_keys[save] = pipe_keys
+                    self._key_store.async_delay_save(lambda: self._pipe_keys, 10)
+                data.networks = networks
+                data.networks_ok = True
         return data
 
 

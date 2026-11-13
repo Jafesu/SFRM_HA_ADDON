@@ -141,6 +141,38 @@
           "no_power": "No power",
           "not_configured": "Not configured"
         }
+      },
+      "pipeline_status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "short_supply": "Short on supply",
+          "over_capacity": "Over pipe capacity",
+          "starving": "Starving",
+          "no_source": "No source",
+          "no_consumers": "No consumers"
+        }
+      },
+      "pipeline_supply": {
+        "name": "Supply"
+      },
+      "pipeline_output": {
+        "name": "Output now"
+      },
+      "pipeline_demand": {
+        "name": "Demand"
+      },
+      "pipeline_capacity": {
+        "name": "Pipe capacity"
+      },
+      "pipeline_shortfall": {
+        "name": "Shortfall"
+      },
+      "pipeline_usage": {
+        "name": "Pipe usage"
+      },
+      "pipeline_lowest_tank": {
+        "name": "Lowest tank"
       }
     },
     "binary_sensor": {
@@ -161,6 +193,9 @@
       },
       "no_power": {
         "name": "No power"
+      },
+      "pipeline_problem": {
+        "name": "Problem"
       }
     },
     "notify": {

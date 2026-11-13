@@ -32,7 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 GRACE = timedelta(minutes=5)
 MIN_MISSES = 3
 # Object kinds this module cleans up, by the first part of the unique ID key.
-KINDS = ("circuit", "switch", "building", "recipe")
+KINDS = ("circuit", "switch", "building", "recipe", "pipeline")
 
 
 def object_key(rest: str) -> str | None:
@@ -114,7 +114,9 @@ class StaleCleaner:
         """Let the platforms create entities for this object again if it comes back
         (circuit IDs and recipes get reused)."""
         added = self.entry.runtime_data.added
-        for item in [a for a in added if a[1] == save and a[2] == okey]:
+        for item in [
+            a for a in added if a[1] == save and (a[2] == okey or a[2].startswith(f"{okey}:"))
+        ]:
             added.discard(item)
 
     @callback
@@ -149,22 +151,26 @@ def sweep_fast(entry: FRMConfigEntry) -> None:
 
 @callback
 def sweep_slow(entry: FRMConfigEntry) -> None:
-    """Buildings and production lines, after each slow poll that loaded every list."""
+    """Buildings, production lines and pipe networks, after each slow poll."""
     from .buildings import NO_GROUP_SWITCH, recipe_of, recipe_slug  # noqa: PLC0415
     from .const import CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES  # noqa: PLC0415
 
-    if not entry.options.get(CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES):
-        return
     rt = entry.runtime_data
     data, fdata = rt.slow.data, rt.fast.data
     if not data or not fdata or not fdata.save or data.session_name != fdata.session_name:
         return
-    if not data.machines_ok or not data.machines:
-        return
-    present = {f"building:{bid}" for bid in data.machines}
-    present |= {
-        f"recipe:{recipe_slug(recipe_of(raw))}"
-        for raw in data.machines.values()
-        if recipe_of(raw) not in NO_GROUP_SWITCH
-    }
-    rt.cleaner.sweep(fdata.save, {"building", "recipe"}, present)
+    kinds: set[str] = set()
+    present: set[str] = set()
+    buildings_on = entry.options.get(CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES)
+    if buildings_on and data.machines_ok and data.machines:
+        kinds |= {"building", "recipe"}
+        present |= {f"building:{bid}" for bid in data.machines}
+        present |= {
+            f"recipe:{recipe_slug(recipe_of(raw))}"
+            for raw in data.machines.values()
+            if recipe_of(raw) not in NO_GROUP_SWITCH
+        }
+    if data.networks_ok and data.networks:
+        kinds.add("pipeline")
+        present |= {f"pipeline:{key}" for key in data.networks}
+    rt.cleaner.sweep(fdata.save, kinds, present)

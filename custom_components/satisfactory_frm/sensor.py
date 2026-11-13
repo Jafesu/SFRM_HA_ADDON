@@ -12,7 +12,13 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, UnitOfEnergy, UnitOfPower, UnitOfTime
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfEnergy,
+    UnitOfPower,
+    UnitOfTime,
+    UnitOfVolumeFlowRate,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -30,11 +36,13 @@ from .buildings import (
 )
 from .const import CONF_BUILDING_ENTITIES, DEFAULT_BUILDING_ENTITIES
 from .coordinator import FRMFastCoordinator, FRMSlowCoordinator, item_plan
+from .pipes import STATUSES as PIPELINE_STATUSES, Network, fluid_inputs, network_names
 from .entity import (
     FRMConfigEntry,
     FRMSaveEntityMixin,
     FRMServerEntity,
     claim,
+    pipeline_device,
     save_device,
     save_uid,
 )
@@ -297,13 +305,30 @@ async def async_setup_entry(
             for d in ITEM_SENSORS:
                 if d.key in wanted and claim(entry, "sensor", save, f"item:{key}:{d.key}"):
                     new.append(ItemSensor(slow, save, key, name, d))
+        names = None
         if buildings_on and data.machines:
-            names = None
             for bid, raw in data.machines.items():
                 if not claim(entry, "sensor", save, f"building:{bid}"):
                     continue
                 names = names or building_names(data.machines)
                 new.append(BuildingStatusSensor(slow, save, bid, names[bid], raw))
+        if data.networks_ok and data.networks:
+            net_names = None
+            for key, net in data.networks.items():
+                if claim(entry, "sensor", save, f"pipeline:{key}"):
+                    net_names = net_names or network_names(data.networks)
+                    new.extend(
+                        PipelineSensor(slow, save, key, net_names[key], d) for d in PIPELINE_SENSORS
+                    )
+                if not buildings_on:
+                    continue
+                for c in net.consumers:
+                    raw = data.machines.get(c["id"])
+                    if raw and claim(entry, "sensor", save, f"building:{c['id']}:tank_{net.fluid}"):
+                        names = names or building_names(data.machines)
+                        new.append(FluidTankSensor(
+                            slow, save, c["id"], names[c["id"]], raw, net.fluid, net.fluid_name or "fluid"
+                        ))
         if new:
             async_add_entities(new)
 
@@ -479,3 +504,135 @@ class BuildingStatusSensor(FRMSaveEntityMixin, CoordinatorEntity[FRMSlowCoordina
             attrs["base_output_mw"] = _num(raw.get("BaseProd"))
             attrs["fuel_amount"] = raw.get("FuelAmount")
         return {k: v for k, v in attrs.items() if v is not None}
+
+
+# --- Save-level: pipe networks -----------------------------------------------
+
+@dataclass(frozen=True, kw_only=True)
+class PipelineSensorDescription(SensorEntityDescription):
+    value_fn: Callable[[Network], Any]
+
+
+def _flow(key: str, fn: Callable[[Network], Any]) -> PipelineSensorDescription:
+    return PipelineSensorDescription(
+        key=key,
+        device_class=SensorDeviceClass.VOLUME_FLOW_RATE,
+        native_unit_of_measurement=UnitOfVolumeFlowRate.CUBIC_METERS_PER_MINUTE,
+        suggested_display_precision=0,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=fn,
+    )
+
+
+def _finite(v: float) -> float | None:
+    return None if v == float("inf") else v
+
+
+PIPELINE_SENSORS: tuple[PipelineSensorDescription, ...] = (
+    PipelineSensorDescription(
+        key="pipeline_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=PIPELINE_STATUSES,
+        value_fn=lambda n: n.status,
+    ),
+    _flow("pipeline_supply", lambda n: n.supply),
+    _flow("pipeline_output", lambda n: n.supply_now),
+    _flow("pipeline_demand", lambda n: n.demand),
+    _flow("pipeline_capacity", lambda n: _finite(n.capacity) if n.sources and n.consumers else None),
+    _flow("pipeline_shortfall", lambda n: n.shortfall),
+    PipelineSensorDescription(
+        key="pipeline_usage",
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=0,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda n: n.usage,
+    ),
+    PipelineSensorDescription(
+        key="pipeline_lowest_tank",
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=0,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda n: n.lowest_tank,
+    ),
+)
+
+
+class PipelineSensor(_SlowSaveSensor):
+    entity_description: PipelineSensorDescription
+
+    def __init__(self, coordinator, save: str, key: str, name: str, description) -> None:
+        super().__init__(coordinator)
+        entry = coordinator.config_entry
+        self._save, self._key = save, key
+        self.entity_description = description
+        self._attr_translation_key = description.key
+        self._attr_unique_id = save_uid(entry, save, f"pipeline:{key}:{description.key}")
+        self._attr_device_info = pipeline_device(entry, save, key, name)
+
+    @property
+    def available(self) -> bool:
+        return (
+            self._slow_ok()
+            and self.coordinator.data.networks_ok
+            and self._key in self.coordinator.data.networks
+        )
+
+    @property
+    def native_value(self) -> Any:
+        return self.entity_description.value_fn(self.coordinator.data.networks[self._key])
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        if self.entity_description.key != "pipeline_status":
+            return None
+        n = self.coordinator.data.networks[self._key]
+        return {
+            "network": self._key,
+            "fluid": n.fluid_name,
+            "sources": len(n.sources),
+            "consumers": len(n.consumers),
+            "deliverable": _finite(n.deliverable),
+            "length_m": n.length_m,
+            "pipes": len(n.pipes),
+        }
+
+
+class FluidTankSensor(_SlowSaveSensor):
+    """How full a machine's internal tank for one fluid is (e.g. a coal
+    generator's water). The live sign that a pipe line is running dry."""
+
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_suggested_display_precision = 0
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:water-percent"
+
+    def __init__(self, coordinator, save: str, bid: str, label: str, raw: dict[str, Any],
+                 fluid: str, fluid_name: str) -> None:
+        super().__init__(coordinator)
+        entry = coordinator.config_entry
+        self._save, self._bid, self._fluid = save, bid, fluid
+        self._attr_name = f"{label} {fluid_name.lower()} tank"
+        self._attr_unique_id = save_uid(entry, save, f"building:{bid}:tank_{fluid}")
+        self._attr_device_info = save_device(
+            entry, save, f"type:{raw.get('ClassName', 'building')}", type_name(raw), "Building group"
+        )
+
+    def _input(self) -> dict[str, Any] | None:
+        raw = self.coordinator.data.machines.get(self._bid)
+        return fluid_inputs(raw).get(self._fluid) if raw else None
+
+    @property
+    def available(self) -> bool:
+        return self._slow_ok() and self._input() is not None
+
+    @property
+    def native_value(self) -> float | None:
+        info = self._input()
+        return info["tank"] if info else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        info = self._input()
+        if not info:
+            return None
+        return {"frm_id": self._bid, "fluid": info["name"], "need": info["max"], "using": info["now"]}

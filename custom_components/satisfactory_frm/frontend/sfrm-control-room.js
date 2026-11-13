@@ -10,15 +10,16 @@
  *   custom:sfrm-grid-card        power dials (compact)
  *   custom:sfrm-power-card       full circuit panels (breaker, battery, trend)
  *   custom:sfrm-generators-card  generator bank with run/standby rockers
+ *   custom:sfrm-fluids-card      pipe networks: supply, demand, pipe capacity, tanks
  *   custom:sfrm-watchlist-card   shortfalls and surpluses
  *   custom:sfrm-levers-card      production line levers
  *   custom:sfrm-throughput-card  throughput board
  *   custom:sfrm-rack-card        machine rack
  */
 
-const SFRM_CR_VERSION = "0.6.0";
+const SFRM_CR_VERSION = "0.7.0";
 const DOMAIN = "satisfactory_frm";
-const CHILD_MODELS = new Set(["Power circuit", "Production", "Power switches", "Building group", "Production lines"]);
+const CHILD_MODELS = new Set(["Power circuit", "Production", "Power switches", "Building group", "Production lines", "Pipeline network"]);
 
 // Fonts: loaded once into the document (shadow roots can't register @font-face).
 (() => {
@@ -233,6 +234,8 @@ const productionFeed = (hass, srv, card) =>
   feed(`prod:${srv.entryId}`, () => hass.callWS({ type: "satisfactory_frm/production", entry_id: srv.entryId }), 20000, card);
 const layerFeed = (hass, srv, layer, card) =>
   feed(`layer:${srv.entryId}:${layer}`, () => hass.callWS({ type: "satisfactory_frm/map_layer", entry_id: srv.entryId, layer }), 20000, card);
+const pipelinesFeed = (hass, srv, card) =>
+  feed(`pipes:${srv.entryId}`, () => hass.callWS({ type: "satisfactory_frm/pipelines", entry_id: srv.entryId }), 20000, card);
 const infoFeed = (hass, srv, card) =>
   feed(`info:${srv.entryId}`, () => hass.callWS({ type: "satisfactory_frm/map_info", entry_id: srv.entryId }), 30000, card);
 function historyFeed(hass, ids, hours, card) {
@@ -536,6 +539,8 @@ class SfrmAlarmsCard extends SfrmBase {
     const shorts = (prod?.items || [])
       .filter((i) => i.produced - i.consumed < -0.05)
       .sort((a, b) => (a.produced - a.consumed) - (b.produced - b.consumed));
+    const pipes = pipelinesFeed(h, srv, this);
+    const badLines = (pipes?.networks || []).filter((n) => n.problem);
     const list = (arr, fn) => arr.slice(0, 2).map(fn).join(", ") + (arr.length > 2 ? ` +${arr.length - 2} more` : "");
     return [
       { id: "link", label: "SERVER LINK", level: "alarm", active: !reach, sub: reach ? "FRM online" : "FRM unreachable", sig: "link" },
@@ -552,6 +557,9 @@ class SfrmAlarmsCard extends SfrmBase {
         sig: drain.map((c) => c.id).join(",") },
       { id: "short", label: "SHORTFALL", level: "warn", active: shorts.length > 0,
         sub: shorts.length ? list(shorts, (i) => `${i.name} ${signed(i.produced - i.consumed)}/min`) : "No shortfalls", sig: shorts.map((i) => i.key).join(",") },
+      { id: "fluid", label: "FLUID LINES", level: "warn", active: badLines.length > 0,
+        sub: badLines.length ? list(badLines, (n) => `${n.name} ${(FLUID_STATUS[n.status]?.[0] || n.status).toLowerCase()}`) : pipes?.networks?.length ? "All lines OK" : "No pipe networks",
+        sig: badLines.map((n) => `${n.key}:${n.status}`).join(",") },
       { id: "idle", label: "MACHINES IDLE", level: "warn", active: idle > 0,
         sub: idle > 0 ? `${idle} waiting on input` : "All machines busy", sig: idle > 0 ? "idle" : "" },
     ];
@@ -762,6 +770,8 @@ class SfrmGeneratorsCard extends SfrmBase {
         const sc = { STANDBY: COL.dim, RUNNING: "#8fe3b0", "NO FUEL": "#ff8a80", "LOW INPUT": COL.amber }[status];
         const label = `${short} ${names[short]}`;
         const fuel = g.FuelAmount;
+        const sup = g.Supplement || {};
+        const water = sup.ClassName && Number(sup.MaxConsumed) > 0 && Number.isFinite(Number(sup.PercentFull)) ? Math.max(0, Math.min(100, Number(sup.PercentFull))) : null;
         return `<div class="well" style="padding:12px;display:flex;flex-direction:column;gap:10px;border-color:${status === "LOW INPUT" ? "#6b5224" : status === "NO FUEL" ? "#6e2a26" : COL.line2}">
           <div class="row" style="flex-wrap:nowrap;gap:8px">
             <div style="min-width:0"><div style="font-size:14px;font-weight:700;line-height:1.2">${esc(label)}</div>
@@ -775,6 +785,10 @@ class SfrmGeneratorsCard extends SfrmBase {
             <span style="flex:1;height:6px;background:${COL.deep};border-radius:3px;overflow:hidden"><span class="grow" style="display:block;height:100%;width:${outPct.toFixed(0)}%;background:${COL.cyan}"></span></span>
             <span class="mono" style="color:${COL.text};width:52px;text-align:right">${outMw.toFixed(0)} MW</span></div>
           ${fuel !== undefined && fuel !== null ? `<div class="lbl">FUEL <span class="mono" style="color:${COL.text2}">${esc(typeof fuel === "number" ? fuel.toFixed(1) : fuel)}</span></div>` : ""}
+          ${water !== null ? `<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:${COL.dim}">
+            <span style="width:48px;letter-spacing:.1em">${esc(String(sup.Name || "WATER").toUpperCase())}</span>
+            <span style="flex:1;height:6px;background:${COL.deep};border-radius:3px;overflow:hidden"><span class="grow" style="display:block;height:100%;width:${water.toFixed(0)}%;background:${tankColor(water)}"></span></span>
+            <span class="mono" style="color:${water < 25 ? "#ff8a80" : COL.text};width:52px;text-align:right">${water.toFixed(0)}%</span></div>` : ""}
         </div>`;
       });
     const genOn = (g) => {
@@ -803,6 +817,71 @@ class SfrmGeneratorsCard extends SfrmBase {
     this.confirm(`Put ${el.dataset.name} on standby?`,
       `It stops producing and burns no fuel.${mw ? ` Its grid loses up to ${mw} MW of capacity.` : ""} You can run it again from here at any time.`,
       "STANDBY", () => { this.pending(arg, false); this.service("switch", "turn_off", arg, refresh); });
+  }
+}
+
+// ================================================================== fluid lines
+const FLUID_STATUS = {
+  ok: ["OK", "#8fe3b0"],
+  starving: ["STARVING", COL.red],
+  over_capacity: ["OVER PIPE CAPACITY", COL.red],
+  short_supply: ["SHORT ON SUPPLY", COL.amber],
+  no_source: ["NO SOURCE", COL.amber],
+  no_consumers: ["NO CONSUMERS", COL.dim],
+};
+const tankColor = (pct) => (pct === null || pct === undefined ? COL.grey : pct < 25 ? COL.red : pct < 50 ? COL.amber : COL.cyan);
+const m3 = (v) => (v === null || v === undefined ? "–" : `${Math.round(v)}`);
+class SfrmFluidsCard extends SfrmBase {
+  css() {
+    return `.lines{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:12px}
+      .meter{display:flex;align-items:center;gap:8px;font-size:11px;color:${COL.dim}}
+      .meter .k{width:84px;letter-spacing:.1em}
+      .meter .bar{flex:1;height:8px;background:${COL.deep};border-radius:4px;overflow:hidden;position:relative}
+      .meter .v{width:92px;text-align:right;color:${COL.text}}
+      .tanks{display:grid;grid-template-columns:repeat(auto-fill,minmax(22px,1fr));gap:4px;align-items:end;height:48px}
+      .tank{display:block;background:${COL.deep};border-radius:3px;height:100%;position:relative;overflow:hidden}
+      .tank span{position:absolute;left:0;right:0;bottom:0}
+      .name{background:none;border:0;color:inherit;font:inherit;padding:0;cursor:pointer;text-align:left}`;
+  }
+  view(srv) {
+    const data = pipelinesFeed(this._hass, srv, this);
+    const head = `<h2 class="t">FLUID LINES</h2>`;
+    if (data === undefined) return `<section class="panel">${head}<div class="empty">Loading pipe networks…</div></section>`;
+    if (!data.ready) return `<section class="panel">${head}<div class="empty">Waiting for the world and building data…</div></section>`;
+    const nets = data.networks || [];
+    if (!nets.length) return `<section class="panel">${head}<div class="empty">No pipe networks in this save.</div></section>`;
+    const bad = nets.filter((n) => n.problem).length;
+    const cards = nets.map((n) => {
+      const [label, color] = FLUID_STATUS[n.status] || [String(n.status).toUpperCase(), COL.dim];
+      const scale = Math.max(n.supply || 0, n.demand || 0, n.capacity || 0, 1);
+      const bar = (v, c) => `<span class="bar"><span class="grow" style="display:block;height:100%;width:${Math.min(100, ((v || 0) / scale) * 100).toFixed(0)}%;background:${c}"></span></span>`;
+      const consumers = [...(n.consumers || [])].sort((a, b) => (a.tank ?? 101) - (b.tank ?? 101));
+      const tanks = consumers.map((c) => `<span class="tank" role="img" title="${esc(`${c.name}: ${c.tank === null ? "no tank data" : `${Math.round(c.tank)}% full`}`)}"
+          aria-label="${esc(`${c.name} ${c.tank === null ? "tank unknown" : `tank ${Math.round(c.tank)} percent`}`)}">
+          <span class="grow" style="height:${Math.max(4, c.tank ?? 0)}%;background:${tankColor(c.tank)}"></span></span>`).join("");
+      const statusEnt = n.entities?.pipeline_status;
+      const usage = n.usage === null || n.usage === undefined ? "" : ` · pipes ${Math.round(n.usage)}% used`;
+      return `<div class="well" style="padding:14px;display:flex;flex-direction:column;gap:10px;border-color:${n.problem ? (color === COL.red ? "#6e2a26" : "#6b5224") : COL.line2}">
+        <div class="row" style="flex-wrap:nowrap;gap:8px">
+          <div style="min-width:0">
+            <button class="name" ${statusEnt ? `data-act="more" data-arg="${esc(statusEnt)}"` : ""} style="font-size:15px;font-weight:700">${esc(n.name)}</button>
+            <div style="font-size:11px;color:${COL.dim}">${n.sources.length} source${n.sources.length === 1 ? "" : "s"} · ${n.consumers.length} consumer${n.consumers.length === 1 ? "" : "s"} · ${Math.round(n.length_m)} m${usage}</div>
+          </div>
+          <span class="row" style="gap:6px;flex-wrap:nowrap;margin-left:auto"><span class="lamp ${n.problem && color === COL.red ? "blink" : ""}" style="background:${color};box-shadow:0 0 8px ${color}"></span>
+            <span style="font-size:11px;letter-spacing:.12em;font-weight:700;color:${color};white-space:nowrap">${label}</span></span>
+        </div>
+        <div class="meter"><span class="k">SUPPLY</span>${bar(n.supply, COL.cyan)}<span class="v mono">${m3(n.supply_now)} / ${m3(n.supply)}</span></div>
+        <div class="meter"><span class="k">DEMAND</span>${bar(n.demand, COL.orange)}<span class="v mono">${m3(n.demand)}</span></div>
+        <div class="meter"><span class="k">PIPE CAP.</span>${bar(n.capacity, COL.grey)}<span class="v mono">${m3(n.capacity)}</span></div>
+        ${n.shortfall > 0.5 ? `<div style="font-size:12px;color:${COL.amber}">Short by ${m3(n.shortfall)} m³/min at full demand</div>` : ""}
+        ${tanks ? `<div><div class="row" style="margin-bottom:6px"><span class="lbl">CONSUMER TANKS</span><span class="lbl mono">LOWEST ${n.lowest_tank === null ? "–" : `${Math.round(n.lowest_tank)}%`}</span></div><div class="tanks">${tanks}</div></div>` : ""}
+        <div class="lbl" style="text-align:right">m³/min · ${esc(n.fluid_name || "fluid")}</div>
+      </div>`;
+    }).join("");
+    return `<section class="panel" aria-label="Fluid lines">
+      <div class="row" style="margin-bottom:12px">${head}<div class="sub">${nets.length} line${nets.length === 1 ? "" : "s"}${bad ? ` · ${bad} with problems` : " · all OK"}</div></div>
+      <div class="lines">${cards}</div>
+    </section>`;
   }
 }
 
@@ -1076,7 +1155,7 @@ class SfrmRackCard extends SfrmBase {
 // ================================================================== page (assembles a whole view)
 const PAGE_LAYOUT = {
   control: [["sfrm-header-card"], ["sfrm-alarms-card", "sfrm-status-card"], ["sfrm-grid-card"], ["sfrm-watchlist-card"]],
-  power: [["sfrm-header-card"], ["sfrm-power-card"], ["sfrm-generators-card"]],
+  power: [["sfrm-header-card"], ["sfrm-power-card"], ["sfrm-fluids-card"], ["sfrm-generators-card"]],
   production: [["sfrm-header-card"], ["sfrm-levers-card"], ["sfrm-throughput-card"]],
   machines: [["sfrm-header-card"], ["sfrm-rack-card"]],
   map: [["sfrm-header-card"], ["satisfactory-map-card"]],
@@ -1136,6 +1215,7 @@ const SFRM_CARDS = [
   ["sfrm-grid-card", SfrmGridCard, "SFRM power dials", "A dial per power circuit"],
   ["sfrm-power-card", SfrmPowerCard, "SFRM power grid", "Circuit panels with breaker, battery tank and load trend"],
   ["sfrm-generators-card", SfrmGeneratorsCard, "SFRM generator bank", "Generators with run/standby switches"],
+  ["sfrm-fluids-card", SfrmFluidsCard, "SFRM fluid lines", "Pipe networks with supply, demand, pipe capacity and consumer tanks"],
   ["sfrm-watchlist-card", SfrmWatchlistCard, "SFRM watchlist", "Biggest shortfalls and surpluses"],
   ["sfrm-levers-card", SfrmLeversCard, "SFRM production levers", "A lever per production line"],
   ["sfrm-throughput-card", SfrmThroughputCard, "SFRM throughput board", "Made, used and net per item"],

@@ -1,4 +1,5 @@
-"""Binary sensors: server reachable, world ready, paused, fuses, battery draining."""
+"""Binary sensors: server reachable, world ready, paused, fuses, battery draining,
+pipe network problems."""
 
 from __future__ import annotations
 
@@ -13,12 +14,14 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .coordinator import FRMFastCoordinator
+from .coordinator import FRMFastCoordinator, FRMSlowCoordinator
+from .pipes import network_names
 from .entity import (
     FRMConfigEntry,
     FRMSaveEntityMixin,
     FRMServerEntity,
     claim,
+    pipeline_device,
     save_device,
     save_uid,
 )
@@ -50,6 +53,27 @@ async def async_setup_entry(
 
     _add_circuits()
     entry.async_on_unload(fast.async_add_listener(_add_circuits))
+
+    slow = entry.runtime_data.slow
+
+    @callback
+    def _add_pipelines() -> None:
+        data, fdata = slow.data, fast.data
+        if not data or not fdata or not fdata.save or data.session_name != fdata.session_name:
+            return
+        if not data.networks_ok:
+            return
+        names = None
+        new = []
+        for key in data.networks:
+            if claim(entry, "binary_sensor", fdata.save, f"pipeline:{key}"):
+                names = names or network_names(data.networks)
+                new.append(PipelineProblemSensor(slow, fdata.save, key, names[key]))
+        if new:
+            async_add_entities(new)
+
+    _add_pipelines()
+    entry.async_on_unload(slow.async_add_listener(_add_pipelines))
 
 
 class ReachableSensor(FRMServerEntity, BinarySensorEntity):
@@ -171,3 +195,42 @@ class NoPowerSensor(_CircuitBinary):
         except (TypeError, ValueError):
             return None
         return cap <= 0 and demand > 0
+
+
+class PipelineProblemSensor(FRMSaveEntityMixin, CoordinatorEntity[FRMSlowCoordinator], BinarySensorEntity):
+    """On when a pipe network is short on supply, over pipe capacity, has no
+    source, or its consumers' tanks are running low."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_translation_key = "pipeline_problem"
+
+    def __init__(self, coordinator: FRMSlowCoordinator, save: str, key: str, name: str) -> None:
+        super().__init__(coordinator)
+        entry = coordinator.config_entry
+        self._save, self._key = save, key
+        self._attr_unique_id = save_uid(entry, save, f"pipeline:{key}:problem")
+        self._attr_device_info = pipeline_device(entry, save, key, name)
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        fast = self.coordinator.fast.data
+        return (
+            super().available
+            and self._save_loaded(self.coordinator.fast)
+            and data is not None
+            and fast is not None
+            and data.session_name == fast.session_name
+            and data.networks_ok
+            and self._key in data.networks
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.data.networks[self._key].problem
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        net = self.coordinator.data.networks[self._key]
+        return {"status": net.status, "shortfall": net.shortfall, "lowest_tank": net.lowest_tank}

@@ -68,9 +68,23 @@ the entry rather than re-adding it.
     standby or back to work at once (none for generators, on purpose)
   - names look like "Constructor Iron Plate 3", numbered in build order; rename
     freely in HA. The HUB's built-in burners are named "HUB Biomass Burner"
+  - a **tank** sensor (%) for every machine that takes a fluid from a pipe, e.g.
+    a coal generator's water tank. A tank running low is the live sign that its
+    line can't keep up
+- Pipe networks: pipes are traced into connected lines ("Water line 1", ...), one
+  device each, with sensors for **status** (OK, short on supply, over pipe capacity,
+  starving, no source, no consumers), **supply** (rated output of its extractors),
+  **output now**, **demand** (what its consumers need at full speed), **pipe
+  capacity** (what the pipes can carry from sources to consumers, worked out from
+  the pipe layout and tiers), **pipe usage**, **shortfall** and **lowest tank**, plus
+  a **problem** binary sensor to automate on. FRM reports no live flow in pipes, so
+  supply, demand and capacity are rated numbers; *starving* comes from the consumers'
+  tanks. Pump head lift isn't modelled. The pipe list is re-read every 5 minutes or
+  when buildings change. A line keeps its entities when you rebuild the extractor
+  it's named after
 
-Things you dismantle in game (buildings, power circuits, power switches, and
-production lines with no buildings left) have their entities and empty devices
+Things you dismantle in game (buildings, power circuits, power switches, pipe
+networks, and production lines with no buildings left) have their entities and empty devices
 removed automatically, once they've been gone for 5 minutes while their save is
 loaded.
 
@@ -94,11 +108,13 @@ strategy:
 You get five views per server, with tabs in the control-room header:
 
 - **Control Room**: status lamps and in-game clock, an alarm panel (fuses, dead grids,
-  overload, draining batteries, shortfalls, idle machines; alarms flash until
+  overload, draining batteries, shortfalls, fluid line problems, idle machines; alarms flash until
   acknowledged, and acknowledgements are remembered per user), factory status, a dial
   per power circuit and a watchlist of the biggest shortfalls and surpluses.
 - **Power**: per circuit a load dial, circuit-breaker indicator, battery tank, stats
-  and a 2-hour load trend, plus the generator bank with run/standby switches.
+  and a 2-hour load trend, fluid lines (supply, demand, pipe capacity and every
+  consumer's tank level), plus the generator bank with run/standby switches and
+  water tank levels.
 - **Production**: a lever per production line (confirms before stopping a line) and a
   throughput board with filters and trends; tap a row for its history.
 - **Machines**: every machine as a rack module with status LED, clock speed,
@@ -173,6 +189,8 @@ Everything goes through Home Assistant, so it works remotely in the HA app and t
 browser never talks to FRM directly. The map image and icons come from your FRM
 server. Moving things (players, trains, drones, vehicles) refresh every 5 s;
 buildings, belts and rails every 60 s, and only while the card is on screen.
+Pipes on a line with a problem are drawn thicker, in red (starving or over capacity)
+or amber (short on supply, no source).
 
 Tap a marker for details. Power switches can be toggled from the map, and machines,
 extractors and generators can be put into standby or set running again.

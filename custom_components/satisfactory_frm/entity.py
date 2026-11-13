@@ -77,6 +77,11 @@ def save_device(
     )
 
 
+def pipeline_device(entry: ConfigEntry, save: str, key: str, name: str) -> DeviceInfo:
+    """One device per pipe network, e.g. "YetAnotherSave Water line 1"."""
+    return save_device(entry, save, f"pipeline:{key}", name, "Pipeline network")
+
+
 def save_uid(entry: ConfigEntry, save: str, key: str) -> str:
     return f"{entry.entry_id}|save:{save}|{key}"
 

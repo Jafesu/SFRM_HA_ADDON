@@ -79,6 +79,37 @@
           "no_power": "mdi:power-plug-off",
           "not_configured": "mdi:cog-off"
         }
+      },
+      "pipeline_status": {
+        "default": "mdi:pipe",
+        "state": {
+          "ok": "mdi:pipe",
+          "starving": "mdi:water-alert",
+          "over_capacity": "mdi:pipe-leak",
+          "short_supply": "mdi:water-minus",
+          "no_source": "mdi:pipe-disconnected"
+        }
+      },
+      "pipeline_supply": {
+        "default": "mdi:water-pump"
+      },
+      "pipeline_output": {
+        "default": "mdi:water-pump"
+      },
+      "pipeline_demand": {
+        "default": "mdi:water-outline"
+      },
+      "pipeline_capacity": {
+        "default": "mdi:pipe"
+      },
+      "pipeline_shortfall": {
+        "default": "mdi:water-minus"
+      },
+      "pipeline_usage": {
+        "default": "mdi:gauge"
+      },
+      "pipeline_lowest_tank": {
+        "default": "mdi:water-percent-alert"
       }
     },
     "binary_sensor": {
@@ -111,6 +142,9 @@
         "state": {
           "on": "mdi:power-plug-off"
         }
+      },
+      "pipeline_problem": {
+        "default": "mdi:pipe-valve"
       }
     },
     "notify": {

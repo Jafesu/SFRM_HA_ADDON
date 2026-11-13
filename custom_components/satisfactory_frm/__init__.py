@@ -41,6 +41,7 @@ from .const import (
 from .coordinator import FRMFastCoordinator, FRMSlowCoordinator, is_produced
 from .entity import FRMConfigEntry, FRMRuntime, server_device
 from .markers import ICONS, MarkerStore
+from .pipes import network_names, network_summary
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ PLATFORMS = [
     Platform.TEXT,
 ]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-CARD_VERSION = "0.6.2"
+CARD_VERSION = "0.7.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -83,6 +84,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     websocket_api.async_register_command(hass, ws_map_info)
     websocket_api.async_register_command(hass, ws_map_layer)
     websocket_api.async_register_command(hass, ws_production)
+    websocket_api.async_register_command(hass, ws_pipelines)
     websocket_api.async_register_command(hass, ws_ping)
     websocket_api.async_register_command(hass, ws_markers_list)
     websocket_api.async_register_command(hass, ws_markers_add)
@@ -115,6 +117,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FRMConfigEntry) -> bool:
     fast.slow = slow
     # The fast coordinator never raises on outages, so setup succeeds even when the
     # server is down; entities appear once the world is ready.
+    await slow.async_load_network_keys()
     await fast.async_config_entry_first_refresh()
     await slow.async_config_entry_first_refresh()
 
@@ -361,6 +364,43 @@ def ws_production(hass: HomeAssistant, connection: websocket_api.ActiveConnectio
             "session_name": fast.session_name if fast else None,
             "items": items,
         },
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "satisfactory_frm/pipelines", vol.Required("entry_id"): str}
+)
+@callback
+def ws_pipelines(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Pipe networks from the slow coordinator's cache (no extra FRM calls)."""
+    entry = _loaded_entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "Server not loaded")
+        return
+    fast, slow = entry.runtime_data.fast.data, entry.runtime_data.slow.data
+    save = fast.save if fast else None
+    ready = bool(
+        save and slow and slow.session_name == fast.session_name and slow.networks_ok
+    )
+    networks: list[dict[str, Any]] = []
+    pipe_network: dict[str, str] = {}
+    if ready:
+        names = network_names(slow.networks)
+        # network key -> {sensor key: entity_id}, so the panel can open history.
+        entities: dict[str, dict[str, str]] = {}
+        prefix = f"{entry.entry_id}|save:{save}|pipeline:"
+        for ent in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id):
+            uid = ent.unique_id or ""
+            if uid.startswith(prefix):
+                key, _, sensor = uid[len(prefix):].rpartition(":")
+                entities.setdefault(key, {})[sensor] = ent.entity_id
+        for key, net in sorted(slow.networks.items(), key=lambda kv: names[kv[0]]):
+            networks.append({**network_summary(net, names[key]), "entities": entities.get(key, {})})
+            for pid in net.pipes:
+                pipe_network[pid] = key
+    connection.send_result(
+        msg["id"],
+        {"ready": ready, "networks": networks, "pipe_network": pipe_network},
     )
 
 

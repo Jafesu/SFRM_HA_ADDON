@@ -122,7 +122,7 @@ function collect(hass) {
     byDevice.get(e.device_id).push(e);
   }
   const devices = [...byDevice.keys()].map((id) => hass.devices?.[id]).filter(Boolean);
-  const CHILD_MODELS = new Set(["Power circuit", "Production", "Power switches", "Building group", "Production lines"]);
+  const CHILD_MODELS = new Set(["Power circuit", "Production", "Power switches", "Building group", "Production lines", "Pipeline network"]);
   const servers = devices.filter((d) => !d.via_device_id && !CHILD_MODELS.has(d.model));
 
   return servers.map((server) => {
